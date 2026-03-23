@@ -1,0 +1,44 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fem-solver"
+version = "0.1.0"
+description = "Solveur éléments finis pour la mécanique des solides (statique & dynamique)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+authors = [
+    {name = "clu23"},
+]
+
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.11",
+    "matplotlib>=3.7",
+    "meshio>=5.3",
+]
+
+[project.optional-dependencies]
+viz3d = ["pyvista>=0.42"]
+perf = ["python-mumps", "numba"]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov",
+    "mypy",
+]
+all = ["fem-solver[viz3d,perf,dev]"]
+
+[tool.setuptools.packages.find]
+include = ["femsolver*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_return_any = true
+warn_unused_configs = true
