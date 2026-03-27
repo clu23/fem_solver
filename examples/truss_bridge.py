@@ -150,7 +150,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Visualisation (amplification × 1000 pour voir la déformée)
     # ------------------------------------------------------------------
-    plot_truss(mesh, u=u, axial_forces=axial_forces, scale=1000, show=True)
+    plot_truss(mesh, u=u, axial_forces=axial_forces, nodal_forces=bc.neumann, show=True)
 
 
 if __name__ == "__main__":
