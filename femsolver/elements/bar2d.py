@@ -75,27 +75,45 @@ class Bar2D(Element):
         return L, dx / L, dy / L
 
     def _rotation_matrix(self, c: float, s: float) -> np.ndarray:
-        """Matrice de rotation locale → globale (2×4).
+        """Matrice de rotation globale → locale 4×4.
 
         Transforme les déplacements globaux [ux1, uy1, ux2, uy2] en
-        déplacements locaux [u_axial_1, u_axial_2].
+        déplacements locaux [u_axial_1, u_transv_1, u_axial_2, u_transv_2].
+
+        Construction
+        ------------
+        On place deux blocs R identiques sur la diagonale — un par nœud :
+
+            R = [[c,  s],   (rotation 2D : projette (x,y) global sur (axial, transv) local)
+                 [-s, c]]
+
+            T = block_diag(R, R) = [[ c,  s,  0,  0],
+                                    [-s,  c,  0,  0],
+                                    [ 0,  0,  c,  s],
+                                    [ 0,  0, -s,  c]]
+
+        La ligne 0 projette (ux1, uy1) sur l'axe de la barre → u_axial_1 = c·ux1 + s·uy1.
+        La ligne 1 projette sur la direction transversale → u_transv_1 = -s·ux1 + c·uy1.
+        Les lignes 2-3 font de même pour le nœud 2.
 
         Parameters
         ----------
         c : float
-            cos θ.
+            cos θ (θ = angle barre / axe x global).
         s : float
             sin θ.
 
         Returns
         -------
-        T_bar : np.ndarray, shape (2, 4)
-            u_local = T_bar @ u_global.
+        T : np.ndarray, shape (4, 4)
+            u_local = T @ u_global.
         """
         return np.array(
             [
-                [c, s, 0.0, 0.0],
-                [0.0, 0.0, c, s],
+                [ c,  s, 0.0, 0.0],
+                [-s,  c, 0.0, 0.0],
+                [0.0, 0.0,  c,  s],
+                [0.0, 0.0, -s,  c],
             ]
         )
 
@@ -152,19 +170,19 @@ class Bar2D(Element):
 
         L, c, s = self._geometry(nodes)
         k = material.E * area / L  # EA/L [N/m]
+        T = self._rotation_matrix(c, s)
 
-        c2 = c * c
-        s2 = s * s
-        cs = c * s
-
-        return k * np.array(
+        # Rigidité axiale pure en repère local (pas de rigidité transversale pour une barre)
+        K_local = k * np.array(
             [
-                [ c2,  cs, -c2, -cs],
-                [ cs,  s2, -cs, -s2],
-                [-c2, -cs,  c2,  cs],
-                [-cs, -s2,  cs,  s2],
+                [ 1.0, 0.0, -1.0, 0.0],
+                [ 0.0, 0.0,  0.0, 0.0],
+                [-1.0, 0.0,  1.0, 0.0],
+                [ 0.0, 0.0,  0.0, 0.0],
             ]
         )
+
+        return T.T @ K_local @ T
 
     def mass_matrix(
         self,
@@ -205,10 +223,14 @@ class Bar2D(Element):
         if area <= 0:
             raise ValueError(f"La section doit être > 0, reçu area={area}")
 
-        L, _, _ = self._geometry(nodes)
+        L, c, s = self._geometry(nodes)
         m = material.rho * area * L / 6.0  # ρAL/6
+        T = self._rotation_matrix(c, s)
 
-        return m * np.array(
+        # Masse consistante en repère local : la barre a de la masse dans les deux directions.
+        # M_local = ρAL/6 · [[2,0,1,0],[0,2,0,1],[1,0,2,0],[0,1,0,2]]
+        # (isotrope → M_local est invariante par rotation : T.T @ M_local @ T = M_local)
+        M_local = m * np.array(
             [
                 [2.0, 0.0, 1.0, 0.0],
                 [0.0, 2.0, 0.0, 1.0],
@@ -216,6 +238,8 @@ class Bar2D(Element):
                 [0.0, 1.0, 0.0, 2.0],
             ]
         )
+
+        return T.T @ M_local @ T
 
     def axial_force(
         self,
@@ -248,9 +272,9 @@ class Bar2D(Element):
         N = E·A·ε = (EA/L) · (u2_local - u1_local)
         """
         L, c, s = self._geometry(nodes)
-        T_bar = self._rotation_matrix(c, s)
-        u_local = T_bar @ u_e          # [u1_axial, u2_axial]
-        delta = u_local[1] - u_local[0]  # allongement axial [m]
+        T = self._rotation_matrix(c, s)
+        u_local = T @ u_e              # [u1_axial, u1_transv, u2_axial, u2_transv]
+        delta = u_local[2] - u_local[0]  # allongement axial = u_axial_2 − u_axial_1 [m]
         return float(material.E * area / L * delta)
 
     def axial_stress(
