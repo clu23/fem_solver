@@ -65,6 +65,56 @@ class ElasticMaterial:
             ]
         )
 
+    def elasticity_matrix_3d(self) -> np.ndarray:
+        """Matrice de comportement D en élasticité 3D isotrope (6×6).
+
+        Loi de Hooke généralisée en notation de Voigt :
+        σ = D ε,  avec ε = [εxx, εyy, εzz, γyz, γxz, γxy].
+
+        Returns
+        -------
+        D : np.ndarray, shape (6, 6)
+            Matrice symétrique définie positive.
+
+        Notes
+        -----
+        En introduisant les constantes de Lamé λ et μ :
+
+            λ = E·ν / ((1+ν)(1−2ν))   (premier coefficient de Lamé)
+            μ = E / (2(1+ν))           (module de cisaillement)
+
+        La matrice prend la forme :
+
+            D = [[λ+2μ, λ,    λ,    0, 0, 0],
+                 [λ,    λ+2μ, λ,    0, 0, 0],
+                 [λ,    λ,    λ+2μ, 0, 0, 0],
+                 [0,    0,    0,    μ, 0, 0],
+                 [0,    0,    0,    0, μ, 0],
+                 [0,    0,    0,    0, 0, μ]]
+
+        Le cas 3D inclut la contrainte plane (σzz ≠ 0) et la déformation
+        transverse (εzz ≠ 0) — aucune hypothèse de réduction dimensionnelle.
+
+        Examples
+        --------
+        >>> steel = ElasticMaterial(E=210e9, nu=0.3, rho=7800)
+        >>> D = steel.elasticity_matrix_3d()
+        >>> D.shape
+        (6, 6)
+        """
+        E, nu = self.E, self.nu
+        lam = E * nu / ((1.0 + nu) * (1.0 - 2.0 * nu))   # λ de Lamé
+        mu  = E / (2.0 * (1.0 + nu))                       # μ = G (cisaillement)
+        D = np.zeros((6, 6))
+        # Bloc normal (contraintes/déformations directes)
+        D[0, 0] = D[1, 1] = D[2, 2] = lam + 2.0 * mu
+        D[0, 1] = D[1, 0] = lam
+        D[0, 2] = D[2, 0] = lam
+        D[1, 2] = D[2, 1] = lam
+        # Bloc cisaillement (γ_ij = 2ε_ij, facteur μ)
+        D[3, 3] = D[4, 4] = D[5, 5] = mu
+        return D
+
     def elasticity_matrix_plane_strain(self) -> np.ndarray:
         """Matrice de comportement D en déformation plane (3×3).
 
