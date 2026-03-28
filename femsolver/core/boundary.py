@@ -13,6 +13,8 @@ def apply_dirichlet(
     F: np.ndarray,
     mesh: Mesh,
     bc: BoundaryConditions,
+    *,
+    penalty_factor: float = 1e15,
 ) -> tuple[csr_matrix, np.ndarray]:
     """Applique les conditions de Dirichlet par la méthode de pénalisation.
 
@@ -40,9 +42,10 @@ def apply_dirichlet(
 
     Notes
     -----
-    Coefficient de pénalisation : α = max(|K|) · 1e15.
-    Cette valeur garantit que les DDL bloqués ont un déplacement ≈ valeur imposée
-    à ~1e-15 de précision relative.
+    Coefficient de pénalisation : α = max(|K|) · ``penalty_factor``.
+    La valeur par défaut 1e15 garantit ~1e-15 de précision pour l'analyse
+    statique. Pour l'analyse modale, utiliser ``penalty_factor=1e8`` afin
+    de limiter le conditionnement de K (critère : α >> ω²_max_physique).
 
     Attention : la méthode de pénalisation peut dégrader le conditionnement de K.
     Pour des systèmes très mal conditionnés, préférer l'élimination directe.
@@ -56,7 +59,7 @@ def apply_dirichlet(
     K_bc = K.tolil()
     F_bc = F.copy()
 
-    alpha = float(K.data.max()) * 1e15 if K.nnz > 0 else 1e15
+    alpha = float(K.data.max()) * penalty_factor if K.nnz > 0 else penalty_factor
 
     for node_id, dof_values in bc.dirichlet.items():
         for dof, value in dof_values.items():

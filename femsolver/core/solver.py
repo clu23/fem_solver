@@ -108,8 +108,12 @@ class ScipyBackend(SolverBackend):
         phi : np.ndarray, shape (n_dof, n_modes)
             Vecteurs propres.
         """
-        omega_sq, phi = eigsh(K, k=n_modes, M=M, which="SM")
-        # Tri par ordre croissant (eigsh ne garantit pas le tri)
+        # Shift-invert (σ=0) : trouve les plus petites valeurs propres de
+        # K φ = ω² M φ en résolvant (K - σM)⁻¹ M φ = (1/ω²) φ.
+        # Beaucoup plus stable que which="SM" car le conditionnement de
+        # l'itération Lanczos ne dépend plus du ratio ω_max/ω_min.
+        # Requiert K positif défini (assuré après conditions aux limites).
+        omega_sq, phi = eigsh(K, k=n_modes, M=M, sigma=0.0, which="LM")
         idx = np.argsort(omega_sq)
         return omega_sq[idx], phi[:, idx]
 
