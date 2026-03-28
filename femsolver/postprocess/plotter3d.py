@@ -145,7 +145,6 @@ def _setup_renderer(off_screen: bool | None = None) -> bool:
         True si le rendu est en mode hors-écran.
     """
     if off_screen is not None:
-        pv.global_theme.backend = "static"
         return off_screen
 
     # Détecter si un display est disponible
