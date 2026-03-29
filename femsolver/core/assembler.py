@@ -110,6 +110,6 @@ class Assembler:
         F = np.zeros(self.mesh.n_dof)
         for node_id, dof_forces in bc.neumann.items():
             for dof, force in dof_forces.items():
-                global_dof = self.mesh.n_dim * node_id + dof
+                global_dof = self.mesh.dpn * node_id + dof
                 F[global_dof] += force
         return F

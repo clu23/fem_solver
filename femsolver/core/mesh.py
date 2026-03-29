@@ -74,6 +74,10 @@ class Mesh:
         Éléments du maillage (connectivité + type + matériau).
     n_dim : int
         Dimension spatiale (2 ou 3).
+    dof_per_node : int or None, optional
+        Nombre de DDL par nœud. Si None (défaut), égal à ``n_dim``.
+        Utiliser ``dof_per_node=3`` pour les éléments poutre 2D (Beam2D)
+        qui ont 3 DDL/nœud (ux, uy, θz) mais des coordonnées 2D.
 
     Examples
     --------
@@ -86,11 +90,18 @@ class Mesh:
     >>> mat = ElasticMaterial(E=210e9, nu=0.3, rho=7800)
     >>> elem = ElementData(Bar2D, (0, 1), mat, {"area": 1e-4})
     >>> mesh = Mesh(nodes=nodes, elements=(elem,), n_dim=2)
+
+    Poutre console à 3 nœuds (Beam2D, 3 DDL/nœud) :
+
+    >>> from femsolver.elements.beam2d import Beam2D
+    >>> nodes = np.array([[0., 0.], [0.5, 0.], [1., 0.]])
+    >>> mesh = Mesh(nodes=nodes, elements=(...,), n_dim=2, dof_per_node=3)
     """
 
     nodes: np.ndarray
     elements: tuple[ElementData, ...]
     n_dim: int
+    dof_per_node: int | None = None
 
     def __post_init__(self) -> None:
         if self.nodes.ndim != 2:
@@ -104,6 +115,15 @@ class Mesh:
             )
         if self.n_dim not in (2, 3):
             raise ValueError(f"n_dim doit être 2 ou 3, reçu {self.n_dim}")
+        if self.dof_per_node is not None and self.dof_per_node < 1:
+            raise ValueError(
+                f"dof_per_node doit être ≥ 1, reçu {self.dof_per_node}"
+            )
+
+    @property
+    def dpn(self) -> int:
+        """DDL par nœud : ``dof_per_node`` si spécifié, sinon ``n_dim``."""
+        return self.dof_per_node if self.dof_per_node is not None else self.n_dim
 
     @property
     def n_nodes(self) -> int:
@@ -112,8 +132,8 @@ class Mesh:
 
     @property
     def n_dof(self) -> int:
-        """Nombre total de degrés de liberté (n_nodes × n_dim)."""
-        return self.n_nodes * self.n_dim
+        """Nombre total de degrés de liberté (n_nodes × dpn)."""
+        return self.n_nodes * self.dpn
 
     def node_coords(self, node_ids: tuple[int, ...]) -> np.ndarray:
         """Coordonnées d'un sous-ensemble de nœuds.
@@ -133,7 +153,8 @@ class Mesh:
     def global_dofs(self, node_ids: tuple[int, ...]) -> list[int]:
         """Indices globaux des DDL associés à un ensemble de nœuds.
 
-        Convention : nœud i → DDL [n_dim*i, n_dim*i+1, …, n_dim*i+n_dim-1].
+        Convention : nœud i → DDL [dpn·i, dpn·i+1, …, dpn·i+dpn−1]
+        où ``dpn = dof_per_node`` (ou ``n_dim`` si non spécifié).
 
         Parameters
         ----------
@@ -144,17 +165,20 @@ class Mesh:
         -------
         list[int]
             Liste des indices de DDL globaux, dans l'ordre
-            (ux_0, uy_0, ux_1, uy_1, …) pour n_dim=2.
+            (ux_0, uy_0, ux_1, uy_1, …) pour n_dim=2 / dof_per_node=None.
 
         Examples
         --------
-        >>> mesh.global_dofs((0, 1))  # n_dim=2
+        >>> mesh.global_dofs((0, 1))  # n_dim=2, dof_per_node=None
         [0, 1, 2, 3]
+        >>> mesh_beam.global_dofs((0, 1))  # n_dim=2, dof_per_node=3
+        [0, 1, 2, 3, 4, 5]
         """
+        dpn = self.dpn
         dofs = []
         for nid in node_ids:
-            for d in range(self.n_dim):
-                dofs.append(self.n_dim * nid + d)
+            for d in range(dpn):
+                dofs.append(dpn * nid + d)
         return dofs
 
 

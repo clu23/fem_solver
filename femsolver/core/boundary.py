@@ -63,7 +63,7 @@ def apply_dirichlet(
 
     for node_id, dof_values in bc.dirichlet.items():
         for dof, value in dof_values.items():
-            global_dof = mesh.n_dim * node_id + dof
+            global_dof = mesh.dpn * node_id + dof
             K_bc[global_dof, global_dof] = alpha
             F_bc[global_dof] = alpha * value
 
