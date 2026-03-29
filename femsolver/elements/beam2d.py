@@ -80,6 +80,7 @@ import numpy as np
 
 from femsolver.core.element import Element
 from femsolver.core.material import ElasticMaterial
+from femsolver.core.sections import Section
 
 
 class Beam2D(Element):
@@ -257,6 +258,60 @@ class Beam2D(Element):
         return T
 
     # ------------------------------------------------------------------
+    # Extraction des propriétés de section
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _beam_props(
+        material: ElasticMaterial,
+        properties: dict,
+    ) -> tuple[float, float]:
+        """Retourne (EA, EI) depuis ``properties``.
+
+        Accepte deux formes :
+
+        - ``{"section": Section}``      → utilise ``section.area`` et ``section.Iz``.
+        - ``{"area": A, "inertia": I}`` → compatibilité ascendante.
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (module d'Young E).
+        properties : dict
+            Propriétés géométriques.
+
+        Returns
+        -------
+        ea : float
+            Rigidité axiale E·A [N].
+        ei : float
+            Rigidité de flexion E·I [N·m²].
+        """
+        if "section" in properties:
+            sec: Section = properties["section"]
+            return material.E * sec.area, material.E * sec.Iz
+        A = float(properties["area"])
+        I = float(properties["inertia"])
+        if A <= 0:
+            raise ValueError(f"area doit être > 0, reçu {A}")
+        if I <= 0:
+            raise ValueError(f"inertia doit être > 0, reçu {I}")
+        return material.E * A, material.E * I
+
+    @staticmethod
+    def _rho_a(material: ElasticMaterial, properties: dict) -> float:
+        """Retourne ρ·A [kg/m] pour la matrice de masse.
+
+        Accepte ``{"section": Section}`` ou ``{"area": A, ...}``.
+        """
+        if "section" in properties:
+            return material.rho * properties["section"].area
+        A = float(properties["area"])
+        if A <= 0:
+            raise ValueError(f"area doit être > 0, reçu {A}")
+        return material.rho * A
+
+    # ------------------------------------------------------------------
     # Interface publique
     # ------------------------------------------------------------------
 
@@ -275,9 +330,11 @@ class Beam2D(Element):
         nodes : np.ndarray, shape (2, 2)
             Coordonnées [[x₁, y₁], [x₂, y₂]] en repère global.
         properties : dict
-            Doit contenir :
-            - ``"area"``    : section transversale A [m²]
-            - ``"inertia"`` : moment quadratique I [m⁴]
+            Deux formes acceptées :
+
+            - ``{"section": Section}``      — objet Section (Beam2D utilise
+              ``section.area`` et ``section.Iz``).
+            - ``{"area": A, "inertia": I}`` — scalaires (compatibilité ascendante).
 
         Returns
         -------
@@ -286,24 +343,25 @@ class Beam2D(Element):
 
         Examples
         --------
-        Poutre horizontale 1 m, acier, section 10 × 10 cm :
+        Avec un dict scalaire (ancienne interface) :
 
         >>> mat = ElasticMaterial(E=210e9, nu=0.3, rho=7800)
         >>> nodes = np.array([[0., 0.], [1., 0.]])
-        >>> props = {"area": 0.01, "inertia": 8.333e-6}
-        >>> K = Beam2D().stiffness_matrix(mat, nodes, props)
+        >>> K = Beam2D().stiffness_matrix(mat, nodes, {"area": 0.01, "inertia": 8.333e-6})
+        >>> K.shape
+        (6, 6)
+
+        Avec un objet Section :
+
+        >>> from femsolver.core.sections import RectangularSection
+        >>> sec = RectangularSection(width=0.1, height=0.1)
+        >>> K = Beam2D().stiffness_matrix(mat, nodes, {"section": sec})
         >>> K.shape
         (6, 6)
         """
-        A = properties["area"]
-        I = properties["inertia"]
-        if A <= 0:
-            raise ValueError(f"area doit être > 0, reçu {A}")
-        if I <= 0:
-            raise ValueError(f"inertia doit être > 0, reçu {I}")
-
         L, c, s = self._geometry(nodes)
-        K_local = self._stiffness_local(material.E * A, material.E * I, L)
+        ea, ei = self._beam_props(material, properties)
+        K_local = self._stiffness_local(ea, ei, L)
         T = self._rotation_matrix(c, s)
         return T.T @ K_local @ T
 
@@ -322,8 +380,9 @@ class Beam2D(Element):
         nodes : np.ndarray, shape (2, 2)
             Coordonnées en repère global.
         properties : dict
-            Doit contenir ``"area"`` [m²]. ``"inertia"`` non utilisé ici
-            (la masse de rotation ρI est négligée, hypothèse Euler–Bernoulli).
+            Accepte ``{"section": Section}`` ou ``{"area": A, ...}``.
+            ``inertia`` n'est pas utilisé (inertie de rotation ρI
+            négligée, hypothèse Euler–Bernoulli).
 
         Returns
         -------
@@ -335,12 +394,9 @@ class Beam2D(Element):
         L'inertie de rotation ρI (terme correctif de Timoshenko) est
         omise : elle est négligeable pour les poutres élancées L/h ≳ 10.
         """
-        A = properties["area"]
-        if A <= 0:
-            raise ValueError(f"area doit être > 0, reçu {A}")
-
         L, c, s = self._geometry(nodes)
-        M_local = self._mass_local(material.rho * A, L)
+        rho_a = self._rho_a(material, properties)
+        M_local = self._mass_local(rho_a, L)
         T = self._rotation_matrix(c, s)
         return T.T @ M_local @ T
 
@@ -384,12 +440,11 @@ class Beam2D(Element):
         Les forces aux nœuds sont les réactions internes (signe convention
         de la poutre, non des réactions d'appui).
         """
-        A = properties["area"]
-        I = properties["inertia"]
         L, c, s = self._geometry(nodes)
         T = self._rotation_matrix(c, s)
         u_local = T @ u_e
-        K_local = self._stiffness_local(material.E * A, material.E * I, L)
+        ea, ei = self._beam_props(material, properties)
+        K_local = self._stiffness_local(ea, ei, L)
         f_local = K_local @ u_local   # [N1, V1, M1, N2, V2, M2]
         return {
             "N1": float(f_local[0]),
