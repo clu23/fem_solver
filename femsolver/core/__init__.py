@@ -4,7 +4,14 @@ from femsolver.core.assembler import Assembler
 from femsolver.core.boundary import apply_dirichlet
 from femsolver.core.element import Element
 from femsolver.core.material import ElasticMaterial
-from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
+from femsolver.core.mesh import (
+    BodyForce,
+    BoundaryConditions,
+    DistributedLineLoad,
+    ElementData,
+    Mesh,
+    PressureLoad,
+)
 from femsolver.core.sections import (
     CircularSection,
     CSection,
@@ -22,9 +29,12 @@ __all__ = [
     "apply_dirichlet",
     "Element",
     "ElasticMaterial",
+    "BodyForce",
     "BoundaryConditions",
+    "DistributedLineLoad",
     "ElementData",
     "Mesh",
+    "PressureLoad",
     "CircularSection",
     "CSection",
     "HollowCircularSection",

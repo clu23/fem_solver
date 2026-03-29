@@ -303,3 +303,61 @@ class Bar2D(Element):
             Contrainte axiale [Pa]. Positif = traction.
         """
         return self.axial_force(material, nodes, area, u_e) / area
+
+    def distributed_load_vector(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        qx: float,
+        qy: float,
+    ) -> np.ndarray:
+        """Forces nodales équivalentes pour une charge axiale uniforme qx [N/m].
+
+        Chaque nœud reçoit la moitié de la charge totale (intégrale exacte
+        pour des fonctions de forme linéaires) :
+
+            f_local = [qx·L/2, 0, qx·L/2, 0]ᵀ   (repère local)
+            f_e     = Tᵀ · f_local                (repère global)
+
+        Parameters
+        ----------
+        qx : float
+            Charge axiale distribuée dans le repère local [N/m].
+            Positif dans le sens nœud_1 → nœud_2.
+        qy : float
+            Doit être 0.  Bar2D ne supporte pas de charge transverse.
+
+        Returns
+        -------
+        f_e : np.ndarray, shape (4,)
+            Forces nodales équivalentes [N] en repère global.
+
+        Raises
+        ------
+        ValueError
+            Si qy ≠ 0.
+
+        Notes
+        -----
+        Validation analytique — barre encastrée-libre (L, EA, q uniforme) :
+
+            u_tip = q·L² / (2·EA)    exact avec 1 seul élément FEM.
+
+        Examples
+        --------
+        >>> mat = ElasticMaterial(E=210e9, nu=0.3, rho=7800)
+        >>> nodes = np.array([[0., 0.], [1., 0.]])
+        >>> f = Bar2D().distributed_load_vector(mat, nodes, {}, qx=1000.0, qy=0.0)
+        >>> f
+        array([500.,   0., 500.,   0.])
+        """
+        if qy != 0.0:
+            raise ValueError(
+                f"Bar2D ne supporte pas de charge transverse (qy={qy!r} ≠ 0). "
+                "Utilisez Beam2D pour les charges transverses."
+            )
+        L, c, s = self._geometry(nodes)
+        f_local = np.array([qx * L / 2.0, 0.0, qx * L / 2.0, 0.0])
+        T = self._rotation_matrix(c, s)
+        return T.T @ f_local

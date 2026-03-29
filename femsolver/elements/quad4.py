@@ -317,6 +317,49 @@ class Quad4(Element):
 
         return M_e * (material.rho * t)
 
+    def body_force_vector(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        b: np.ndarray,
+    ) -> np.ndarray:
+        """Forces nodales équivalentes pour une force de volume uniforme b [N/m³].
+
+        f_e = ρ · t · ∫∫ Nᵀ · b |det J| dξ dη   (intégration 2×2 Gauss)
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (rho utilisé).
+        nodes : np.ndarray, shape (4, 2)
+            Coordonnées nodales.
+        properties : dict
+            ``"thickness"`` : épaisseur [m].
+        b : np.ndarray, shape (2,)
+            Force de volume [N/m³] = ρ · acceleration.
+
+        Returns
+        -------
+        f_e : np.ndarray, shape (8,)
+            Forces nodales équivalentes [N].
+
+        Notes
+        -----
+        Pour un rectangle de dimensions a×b, chaque nœud reçoit exactement
+        ρ·t·a·b/4 · b_vect (équipartition — vérifiable analytiquement).
+        """
+        t = properties.get("thickness", 1.0)
+        f_e = np.zeros(8)
+        for xi, eta, w in _GAUSS_POINTS_2X2:
+            Nv = self._shape_functions(xi, eta)   # shape (4,)
+            dN = self._shape_function_derivatives(xi, eta)
+            J = self._jacobian(dN, nodes)
+            det_J = np.linalg.det(J)
+            # np.kron(Nv, b) crée [N1*bx, N1*by, N2*bx, N2*by, N3*bx, N3*by, N4*bx, N4*by]
+            f_e += w * np.kron(Nv, b) * det_J
+        return f_e * (material.rho * t)
+
     def strain(
         self,
         nodes: np.ndarray,

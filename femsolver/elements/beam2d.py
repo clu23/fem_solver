@@ -404,6 +404,80 @@ class Beam2D(Element):
     # Post-traitement : efforts internes
     # ------------------------------------------------------------------
 
+    def distributed_load_vector(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        qx: float,
+        qy: float,
+    ) -> np.ndarray:
+        """Forces nodales équivalentes pour une charge distribuée uniforme.
+
+        Utilise les fonctions de forme de Hermite pour la partie transverse
+        (charge qy) et des fonctions de forme linéaires pour la partie axiale
+        (charge qx). La solution est **exacte aux nœuds** pour 1 seul élément.
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Non utilisé (interface commune avec les autres éléments).
+        nodes : np.ndarray, shape (2, 2)
+            Coordonnées des nœuds en repère global.
+        properties : dict
+            Propriétés de section (non utilisées ici, interface uniforme).
+        qx : float
+            Charge axiale distribuée dans le repère local [N/m].
+            Positif dans le sens nœud 1 → nœud 2.
+        qy : float
+            Charge transverse distribuée dans le repère local [N/m].
+            Positif dans le sens +y local (vers le haut pour une poutre
+            horizontale).
+
+        Returns
+        -------
+        f_e : np.ndarray, shape (6,)
+            Forces nodales équivalentes [N, N, N·m, N, N, N·m] en repère
+            global, dans l'ordre [Fx₁, Fy₁, Mz₁, Fx₂, Fy₂, Mz₂].
+
+        Notes
+        -----
+        Intégrales des fonctions de Hermite sur [0, L] :
+
+        ∫₀ᴸ H₁ dx = L/2,   ∫₀ᴸ H₂ dx = L²/12
+        ∫₀ᴸ H₃ dx = L/2,   ∫₀ᴸ H₄ dx = −L²/12
+
+        Vecteur local (ordre [ux₁, uy₁, θ₁, ux₂, uy₂, θ₂]) :
+
+            f_local = [qx·L/2,   qy·L/2,   qy·L²/12,
+                       qx·L/2,   qy·L/2,  −qy·L²/12]
+
+        Validation analytique — console encastrée-libre (L, EI, q uniforme) :
+
+            δ_tip  = q·L⁴/(8·EI)    ← exact avec 1 seul élément
+            θ_tip  = q·L³/(6·EI)    ← exact avec 1 seul élément
+
+        Examples
+        --------
+        >>> mat = ElasticMaterial(E=210e9, nu=0.3, rho=7800)
+        >>> nodes = np.array([[0., 0.], [1., 0.]])
+        >>> f = Beam2D().distributed_load_vector(mat, nodes, {}, qx=0., qy=1000.)
+        >>> f  # [0, 500, 83.33, 0, 500, -83.33]
+        array([  0.        , 500.        ,  83.33333333,   0.        ,
+               500.        , -83.33333333])
+        """
+        L, c, s = self._geometry(nodes)
+        f_local = np.array([
+            qx * L / 2.0,         # Fx1 : axial (linéaire)
+            qy * L / 2.0,         # Fy1 : transverse ∫H₁·qy dx
+            qy * L**2 / 12.0,     # Mz1 : moment ∫H₂·qy dx
+            qx * L / 2.0,         # Fx2 : axial (linéaire)
+            qy * L / 2.0,         # Fy2 : transverse ∫H₃·qy dx
+            -qy * L**2 / 12.0,    # Mz2 : moment ∫H₄·qy dx (négatif)
+        ])
+        T = self._rotation_matrix(c, s)
+        return T.T @ f_local
+
     def section_forces(
         self,
         material: ElasticMaterial,

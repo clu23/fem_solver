@@ -118,3 +118,90 @@ class Element(ABC):
             n_nodes() * dof_per_node()
         """
         return self.n_nodes() * self.dof_per_node()
+
+    # ------------------------------------------------------------------
+    # Méthodes optionnelles (chargements distribués / forces de volume)
+    # ------------------------------------------------------------------
+
+    def body_force_vector(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        b: np.ndarray,
+    ) -> np.ndarray:
+        """Forces nodales équivalentes pour une force de volume b [N/m³].
+
+        f_e = ∫_Ve  N^T · b dV
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (densité ρ utilisée).
+        nodes : np.ndarray, shape (n_elem_nodes, n_dim)
+            Coordonnées des nœuds.
+        properties : dict
+            Propriétés géométriques (épaisseur pour éléments 2D, etc.).
+        b : np.ndarray, shape (n_dim,)
+            Vecteur d'accélération [m/s²] multiplié par ρ — ou directement
+            la force par unité de volume [N/m³].
+
+        Returns
+        -------
+        f_e : np.ndarray, shape (n_dof_elem,)
+            Vecteur de forces nodales équivalentes [N].
+
+        Raises
+        ------
+        NotImplementedError
+            Si l'élément ne supporte pas les forces de volume.
+            Bar2D et Beam2D lèvent cette exception (pas de volume surfacique).
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} ne supporte pas les forces de volume. "
+            "Implémentez body_force_vector() dans la sous-classe."
+        )
+
+    def distributed_load_vector(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        qx: float,
+        qy: float,
+    ) -> np.ndarray:
+        """Forces nodales équivalentes pour une charge linéique (Bar2D / Beam2D).
+
+        f_e = ∫_0^L  N^T · q dx
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (non utilisé pour les éléments linéaires élastiques
+            mais disponible pour une éventuelle dépendance matériau).
+        nodes : np.ndarray, shape (2, n_dim)
+            Coordonnées des 2 nœuds de l'élément.
+        properties : dict
+            Propriétés géométriques.
+        qx : float
+            Charge axiale distribuée dans le repère local [N/m].
+        qy : float
+            Charge transverse distribuée dans le repère local [N/m].
+            Non nul uniquement pour Beam2D.
+
+        Returns
+        -------
+        f_e : np.ndarray, shape (n_dof_elem,)
+            Vecteur de forces nodales équivalentes [N], en repère global.
+
+        Raises
+        ------
+        NotImplementedError
+            Pour les éléments qui ne sont pas des éléments 1D (Tri3, Quad4…).
+        ValueError
+            Si qy ≠ 0 sur Bar2D (pas de résistance transverse).
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} ne supporte pas les charges linéiques. "
+            "Implémentez distributed_load_vector() dans la sous-classe."
+        )

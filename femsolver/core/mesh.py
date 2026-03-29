@@ -183,6 +183,92 @@ class Mesh:
 
 
 @dataclass(frozen=True)
+class PressureLoad:
+    """Pression surfacique sur une arête (2D) ou une face (3D).
+
+    Les nœuds doivent être listés dans l'ordre **CCW** (sens antihoraire
+    vu de l'extérieur du domaine).  La normale sortante est déduite
+    automatiquement de cet ordre et vérifiée lors de l'assemblage.
+
+    Parameters
+    ----------
+    node_ids : tuple[int, ...]
+        Nœuds de la face dans l'ordre CCW :
+
+        - 2 nœuds  → arête 2D (Tri3, Quad4)
+        - 3 nœuds  → face triangulaire 3D (Tetra4)
+        - 4 nœuds  → face quadrangulaire 3D (Hexa8)
+
+    magnitude : float
+        Intensité de la pression [Pa].  Positif = compression
+        (la force est dirigée vers l'intérieur, i.e. dans le sens −n̂).
+
+    Examples
+    --------
+    Pression de 10 kPa sur l'arête droite d'un carré (nœuds 1→2) :
+
+    >>> load = PressureLoad(node_ids=(1, 2), magnitude=10_000.0)
+    """
+
+    node_ids: tuple[int, ...]
+    magnitude: float
+
+
+@dataclass(frozen=True)
+class BodyForce:
+    """Force de volume uniforme sur tout le maillage (gravité, inertie…).
+
+    Parameters
+    ----------
+    acceleration : tuple[float, ...]
+        Vecteur d'accélération du champ de forces [m/s²].
+        La force par unité de volume est b = ρ · acceleration.
+
+        - 2D : (ax, ay)   — ex: (0.0, −9.81) pour la gravité vers −y
+        - 3D : (ax, ay, az)
+
+    Examples
+    --------
+    >>> gravity_2d = BodyForce(acceleration=(0.0, -9.81))
+    >>> gravity_3d = BodyForce(acceleration=(0.0, 0.0, -9.81))
+    """
+
+    acceleration: tuple[float, ...]
+
+
+@dataclass(frozen=True)
+class DistributedLineLoad:
+    """Charge linéique sur un élément Bar2D (axiale) ou Beam2D (qx + qy).
+
+    Les forces sont spécifiées dans le **repère local** de l'élément :
+
+    - *qx* : force par unité de longueur dans la direction axiale [N/m].
+    - *qy* : force par unité de longueur dans la direction transverse [N/m]
+      (uniquement pour Beam2D ; une erreur est levée si qy ≠ 0 sur Bar2D).
+
+    Parameters
+    ----------
+    node_ids : tuple[int, int]
+        Nœuds de l'élément (même ordre que dans ``ElementData.node_ids``).
+    qx : float
+        Charge axiale distribuée [N/m].  Positif dans le sens i→j.
+    qy : float
+        Charge transverse distribuée [N/m].  Positif dans le sens +y local
+        (vers le haut pour une poutre horizontale).
+
+    Examples
+    --------
+    Charge transverse uniforme q = 5 kN/m sur l'élément (nœuds 0→1) :
+
+    >>> load = DistributedLineLoad(node_ids=(0, 1), qy=-5_000.0)
+    """
+
+    node_ids: tuple[int, int]
+    qx: float = 0.0
+    qy: float = 0.0
+
+
+@dataclass(frozen=True)
 class BoundaryConditions:
     """Conditions aux limites d'un problème posé sur un maillage.
 
@@ -199,6 +285,12 @@ class BoundaryConditions:
     neumann : dict[int, dict[int, float]]
         Forces nodales appliquées. Format : {node_id: {dof: force [N]}}.
         Exemple : {3: {1: -5000.0}} → force de -5 kN en y sur nœud 3.
+    pressure : tuple[PressureLoad, ...]
+        Pressions surfaciques.  Défaut : vide.
+    body_force : BodyForce or None
+        Force de volume uniforme (gravité…).  Défaut : None.
+    distributed : tuple[DistributedLineLoad, ...]
+        Charges linéiques sur Bar2D / Beam2D.  Défaut : vide.
 
     Examples
     --------
@@ -206,7 +298,15 @@ class BoundaryConditions:
     ...     dirichlet={0: {0: 0.0, 1: 0.0}, 1: {1: 0.0}},
     ...     neumann={3: {1: -10000.0}},
     ... )
+    >>> bc_gravity = BoundaryConditions(
+    ...     dirichlet={0: {0: 0.0, 1: 0.0}},
+    ...     neumann={},
+    ...     body_force=BodyForce(acceleration=(0.0, -9.81)),
+    ... )
     """
 
     dirichlet: dict[int, dict[int, float]]
     neumann: dict[int, dict[int, float]]
+    pressure: tuple[PressureLoad, ...] = field(default_factory=tuple)
+    body_force: BodyForce | None = None
+    distributed: tuple[DistributedLineLoad, ...] = field(default_factory=tuple)

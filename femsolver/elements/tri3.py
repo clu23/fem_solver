@@ -263,6 +263,57 @@ class Tri3(Element):
         )
         return M_e
 
+    def body_force_vector(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        b: np.ndarray,
+    ) -> np.ndarray:
+        """Forces nodales équivalentes pour une force de volume uniforme b [N/m³].
+
+        f_e = ρ · t · A / 3 · [bx, by, bx, by, bx, by]ᵀ
+
+        Résulte de l'intégration exacte des fonctions de forme linéaires du CST :
+        ∫_A Ni dA = A/3 pour chaque nœud.
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (rho utilisé).
+        nodes : np.ndarray, shape (3, 2)
+            Coordonnées nodales.
+        properties : dict
+            ``"thickness"`` : épaisseur [m].
+        b : np.ndarray, shape (2,)
+            Force de volume [N/m³] = ρ · acceleration.
+
+        Returns
+        -------
+        f_e : np.ndarray, shape (6,)
+            Forces nodales équivalentes [N].
+
+        Notes
+        -----
+        Validation : somme des forces = ρ · t · A · b (équilibre global).
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from femsolver.core.material import ElasticMaterial
+        >>> mat = ElasticMaterial(E=210e9, nu=0.3, rho=7800)
+        >>> nodes = np.array([[0.,0.],[1.,0.],[0.,1.]])
+        >>> b = np.array([0., -9.81 * 7800])
+        >>> f = Tri3().body_force_vector(mat, nodes, {"thickness": 0.01}, b)
+        >>> abs(sum(f[1::2]) - (-9.81 * 7800 * 7800 * 0.01 * 0.5)) < 1.0
+        True
+        """
+        area, *_ = self._geometry(nodes)
+        t = properties.get("thickness", 1.0)
+        # Chaque nœud reçoit 1/3 de la force totale (intégrale exacte CST)
+        f_node = material.rho * t * area / 3.0 * b   # shape (2,)
+        return np.tile(f_node, 3)
+
     def strain(self, nodes: np.ndarray, u_e: np.ndarray) -> np.ndarray:
         """Vecteur de déformations ε = B · u_e (constant dans l'élément).
 

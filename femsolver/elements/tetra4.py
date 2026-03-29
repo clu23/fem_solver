@@ -340,6 +340,44 @@ class Tetra4(Element):
         )
         return np.kron(m_scalar, np.eye(3))
 
+    def body_force_vector(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        b: np.ndarray,
+    ) -> np.ndarray:
+        """Forces nodales équivalentes pour une force de volume uniforme b [N/m³].
+
+        f_e = ρ · V / 4 · [bx, by, bz,  bx, by, bz,  bx, by, bz,  bx, by, bz]ᵀ
+
+        Résulte de l'intégration exacte des fonctions de forme linéaires :
+        ∫_V Ni dV = V/4 pour chaque nœud.
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (rho utilisé).
+        nodes : np.ndarray, shape (4, 3)
+            Coordonnées nodales.
+        properties : dict
+            Non utilisé pour Tetra4.
+        b : np.ndarray, shape (3,)
+            Force de volume [N/m³] = ρ · acceleration.
+
+        Returns
+        -------
+        f_e : np.ndarray, shape (12,)
+            Forces nodales équivalentes [N].
+
+        Notes
+        -----
+        Validation : somme des forces = ρ · V · b (équilibre global).
+        """
+        _, volume = self._jacobian_and_volume(nodes)
+        f_node = material.rho * volume / 4.0 * b   # shape (3,)
+        return np.tile(f_node, 4)
+
     # ------------------------------------------------------------------
     # Post-traitement
     # ------------------------------------------------------------------

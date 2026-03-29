@@ -505,6 +505,51 @@ class Hexa8(Element):
 
         return M_e * material.rho
 
+    def body_force_vector(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        b: np.ndarray,
+    ) -> np.ndarray:
+        """Forces nodales équivalentes pour une force de volume uniforme b [N/m³].
+
+        f_e = ρ · ∫∫∫ Nᵀ · b |det J| dξ dη dζ   (intégration 2×2×2 Gauss)
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (rho utilisé).
+        nodes : np.ndarray, shape (8, 3)
+            Coordonnées nodales.
+        properties : dict
+            Non utilisé pour Hexa8.
+        b : np.ndarray, shape (3,)
+            Force de volume [N/m³] = ρ · acceleration.
+
+        Returns
+        -------
+        f_e : np.ndarray, shape (24,)
+            Forces nodales équivalentes [N].
+
+        Notes
+        -----
+        Pour un hexaèdre régulier (parallélépipède), chaque nœud reçoit
+        exactement ρ·V/8 · b (équipartition — vérifiable analytiquement).
+        """
+        if nodes.shape != (8, 3):
+            raise ValueError(
+                f"Hexa8 attend nodes.shape == (8, 3), reçu {nodes.shape}"
+            )
+        f_e = np.zeros(24)
+        for xi, eta, zeta, w in _GAUSS_POINTS_2X2X2:
+            Nv = self._shape_functions(xi, eta, zeta)   # (8,)
+            dN = self._shape_function_derivatives(xi, eta, zeta)
+            _, det_J = self._jacobian(dN, nodes)
+            # np.kron(Nv, b) → [N0*bx, N0*by, N0*bz, N1*bx, …]
+            f_e += w * np.kron(Nv, b) * det_J
+        return f_e * material.rho
+
     # ------------------------------------------------------------------
     # Post-traitement
     # ------------------------------------------------------------------
