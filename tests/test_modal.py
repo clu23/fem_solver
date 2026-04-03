@@ -26,6 +26,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from femsolver.core.assembler import Assembler
+from femsolver.core.boundary import DirichletSystem, apply_dirichlet
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.dynamics.modal import ModalResult, lumped_mass, run_modal
@@ -284,3 +286,151 @@ class TestFixedFreeBarModes:
             result.freqs, f_ref, rtol=0.01,
             err_msg="Masse condensée : erreur > 1 % sur barre encastrée–libre",
         )
+
+
+# ===========================================================================
+# Tests de l'élimination vraie (DirichletSystem)
+# ===========================================================================
+
+
+class TestDirichletSystemElimination:
+    """Vérifie la réduction exacte du système et l'absence de modes parasites.
+
+    La barre encastrée–encastrée est choisie car :
+    - La méthode row-zero (K[s,s]=1, M[s,s]≠0) produirait des modes
+      parasites à ω²=1/M[s,s] ≈ (10–50 Hz) parmi les modes physiques.
+    - L'élimination vraie les supprime complètement.
+    """
+
+    N_ELEM = 20
+
+    def setup_method(self):
+        self.mesh, self.bc = _fixed_fixed_bar(self.N_ELEM)
+        assembler = Assembler(self.mesh)
+        self.K = assembler.assemble_stiffness()
+        self.M = assembler.assemble_mass()
+        F_dummy = np.zeros(self.mesh.n_dof)
+        self.ds = apply_dirichlet(self.K, F_dummy, self.mesh, self.bc)
+
+    # -- Propriétés du DirichletSystem --
+
+    def test_returns_dirichlet_system(self):
+        """apply_dirichlet retourne un DirichletSystem."""
+        assert isinstance(self.ds, DirichletSystem)
+
+    def test_backward_compat_unpack(self):
+        """K_bc, F_bc = apply_dirichlet(...) fonctionne toujours."""
+        K_bc, F_bc = self.ds
+        assert K_bc.shape == (self.mesh.n_dof, self.mesh.n_dof)
+        assert F_bc.shape == (self.mesh.n_dof,)
+
+    def test_free_dofs_count(self):
+        """n_free = n_dof - n_constrained.
+
+        Bar2D, N=20, n_nodes=21, n_dof=42 :
+        Contraintes : ux(0)=0, ux(20)=0, uy(i)=0 pour i=0..20
+        → 2 + 21 = 23 DDL globaux bloqués → n_free = 42 - 23 = 19.
+        """
+        # Comptage des DDL globaux bloqués (pas des local DOF uniques)
+        constrained_global = {
+            self.mesh.dpn * node + ldof
+            for node, dofs in self.bc.dirichlet.items()
+            for ldof in dofs
+        }
+        expected_free = self.mesh.n_dof - len(constrained_global)
+        assert len(self.ds.free_dofs) == expected_free
+
+    def test_K_free_shape(self):
+        """K_free est carré de taille n_free."""
+        n_free = len(self.ds.free_dofs)
+        assert self.ds.K_free.shape == (n_free, n_free)
+
+    def test_M_free_shape(self):
+        """M_free est carré de taille n_free."""
+        n_free = len(self.ds.free_dofs)
+        M_free = self.ds.reduce_mass(self.M)
+        assert M_free.shape == (n_free, n_free)
+
+    def test_K_free_equals_K_original_submatrix(self):
+        """K_free = K_original[free, free] (invariant row-zero)."""
+        f = self.ds.free_dofs
+        K_free_direct = self.K.tocsr()[f, :][:, f].tocsr()
+        np.testing.assert_allclose(
+            self.ds.K_free.toarray(),
+            K_free_direct.toarray(),
+            atol=1e-10,
+        )
+
+    def test_F_free_contains_rhs_correction(self):
+        """F_free = F[free] - K_fc @ ū_c (force soustraite aux DDL libres).
+
+        Pour ce cas, ū = 0 partout → F_free = F[free] = 0.
+        """
+        F_free = self.ds.F_free
+        np.testing.assert_allclose(F_free, 0.0, atol=1e-15)
+
+    def test_penalty_raises_for_K_free(self):
+        """method='penalty' lève NotImplementedError sur K_free."""
+        F_dummy = np.zeros(self.mesh.n_dof)
+        ds_pen = apply_dirichlet(
+            self.K, F_dummy, self.mesh, self.bc, method="penalty"
+        )
+        with pytest.raises(NotImplementedError):
+            _ = ds_pen.K_free
+
+    def test_penalty_raises_for_reduce_mass(self):
+        """method='penalty' lève NotImplementedError sur reduce_mass."""
+        F_dummy = np.zeros(self.mesh.n_dof)
+        ds_pen = apply_dirichlet(
+            self.K, F_dummy, self.mesh, self.bc, method="penalty"
+        )
+        with pytest.raises(NotImplementedError):
+            ds_pen.reduce_mass(self.M)
+
+    # -- Absence de modes parasites --
+
+    def test_no_spurious_modes_vs_row_zero(self):
+        """L'élimination vraie donne les fréquences physiques sans modes parasites.
+
+        Avec row-zero (K[s,s]=1, M[s,s]≠0), les DDL uy bloqués auraient
+        ω²_parasite = 1/M[s,s] << 1 Hz — sous le premier mode physique.
+        On vérifie que les 3 premiers modes sont bien les fréquences physiques.
+        N_ELEM=20 → erreur de discrétisation ~1 % sur les premiers modes.
+        """
+        # Maillage plus fin pour avoir rtol=0.01 sur les 3 premiers modes
+        mesh, bc = _fixed_fixed_bar(n_elem=100)
+        result = run_modal(mesh, bc, n_modes=3)
+        f_ref = np.array([n * C / (2.0 * L) for n in range(1, 4)])
+        np.testing.assert_allclose(
+            result.freqs, f_ref, rtol=0.01,
+            err_msg="Modes parasites détectés : fréquences hors de l'analytique.",
+        )
+
+    def test_constrained_dofs_zero_in_modes(self):
+        """Les DDL contraints ont une valeur modale exactement nulle."""
+        result = run_modal(self.mesh, self.bc, n_modes=3)
+        constrained_dofs = [
+            self.mesh.dpn * node + dof
+            for node, dofs in self.bc.dirichlet.items()
+            for dof in dofs
+        ]
+        for k in range(result.n_modes):
+            np.testing.assert_allclose(
+                result.modes[constrained_dofs, k], 0.0, atol=1e-14,
+                err_msg=f"Mode {k+1} : DDL contraint non nul.",
+            )
+
+    def test_modes_M_orthogonal(self):
+        """φᵀ M φ = I (M-orthogonalité des modes complets)."""
+        result = run_modal(self.mesh, self.bc, n_modes=5)
+        phi = result.modes    # (n_dof, n_modes)
+        gram = phi.T @ self.M @ phi
+        np.testing.assert_allclose(gram, np.eye(5), atol=1e-8,
+                                   err_msg="Modes non M-orthogonaux.")
+
+    def test_recover_modes_full_size(self):
+        """recover_modes retourne des vecteurs de taille n_dof."""
+        phi_free = np.random.rand(len(self.ds.free_dofs), 3)
+        phi_full = self.ds.recover_modes(phi_free)
+        assert phi_full.shape == (self.mesh.n_dof, 3)
+        np.testing.assert_array_equal(phi_full[self.ds.free_dofs], phi_free)

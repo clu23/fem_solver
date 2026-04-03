@@ -7,6 +7,37 @@ Ce module fournit :
 
 Le solveur sous-jacent est ``ModalSolver`` (femsolver.core.solver),
 qui utilise ``scipy.sparse.linalg.eigsh`` (algorithme de Lanczos).
+
+Stratégie d'imposition des conditions aux limites
+-------------------------------------------------
+On utilise la **méthode d'élimination vraie** :
+
+1. ``apply_dirichlet(K, ...)`` (mode ``"elimination"``) produit un
+   ``DirichletSystem`` qui expose ``K_free``, ``reduce_mass()`` et
+   ``recover_modes()``.
+
+2. ``K_free = K_bc[free, free]`` et ``M_free = M[free, free]`` sont
+   les sous-matrices exactes des DDL libres.
+
+3. On résout ``K_free φ = ω² M_free φ`` avec ``eigsh`` (Lanczos,
+   shift-invert σ=0).
+
+4. Les vecteurs propres sont reconstruits à taille n_dof :
+   ``φ_full[free] = φ_free``, ``φ_full[constrained] = 0``.
+
+**Pourquoi l'élimination vraie évite les modes parasites**
+
+Avec la pénalisation ou le row-zero partiel (K[s,s]=1, M[s,s]≠0), le
+spectre de ``(K, M)`` contient des valeurs propres parasites :
+
+- *Pénalisation* : ω²_parasite = α / M[s,s] → très grande (haute fréquence),
+  mais α doit être finement calibré (1e8 × max(K)) pour ne pas dégrader
+  le conditionnement ni interférer avec les modes physiques.
+- *Row-zero* : ω²_parasite = 1 / M[s,s] → peut tomber parmi les premiers
+  modes physiques (basse fréquence ≈ 1 Hz pour l'acier).
+
+Avec l'élimination vraie, K_free et M_free ne contiennent plus les DDL
+bloqués : aucun mode parasite, spectre purement physique.
 """
 
 from __future__ import annotations
@@ -33,7 +64,8 @@ class ModalResult:
     omega : np.ndarray, shape (n_modes,)
         Pulsations propres ω_n [rad/s].
     modes : np.ndarray, shape (n_dof, n_modes)
-        Vecteurs propres (colonnes), M-normalisés : φᵀ M φ = I.
+        Vecteurs propres (colonnes), M_free-normalisés : φᵀ M φ = I.
+        Les DDL contraints ont une valeur nulle exacte.
     n_modes : int
         Nombre de modes extraits.
     """
@@ -72,6 +104,9 @@ def lumped_mass(M: csr_matrix) -> csr_matrix:
     La masse condensée surestime légèrement les fréquences propres
     (borne supérieure), contrairement à la masse consistante qui les
     sous-estime (borne inférieure).
+
+    Pour l'analyse modale avec ``run_modal``, appliquer ``lumped_mass``
+    **avant** de réduire M aux DDL libres (``ds.reduce_mass``).
     """
     row_sums = np.asarray(M.sum(axis=1)).ravel()
     return diags(row_sums, format="csr")
@@ -83,10 +118,10 @@ def run_modal(
     n_modes: int = 5,
     use_lumped: bool = False,
 ) -> ModalResult:
-    """Exécute une analyse modale complète.
+    """Exécute une analyse modale complète avec élimination vraie des CL.
 
-    Assemble K et M, applique les conditions de Dirichlet sur K,
-    puis résout le problème aux valeurs propres généralisé K φ = ω² M φ.
+    Assemble K et M, réduit le système aux DDL libres par élimination vraie,
+    puis résout le problème aux valeurs propres K_free φ = ω² M_free φ.
 
     Parameters
     ----------
@@ -97,38 +132,60 @@ def run_modal(
     n_modes : int
         Nombre de modes propres à extraire (les plus basses fréquences).
     use_lumped : bool
-        Si ``True``, utilise la masse condensée diagonale.
+        Si ``True``, utilise la masse condensée diagonale (row-sum).
         Si ``False`` (défaut), utilise la masse consistante.
 
     Returns
     -------
     result : ModalResult
-        Fréquences [Hz], pulsations [rad/s] et modes propres.
+        Fréquences [Hz], pulsations [rad/s] et modes propres (taille n_dof,
+        zéros aux DDL contraints).
 
     Notes
     -----
-    Les conditions de Dirichlet sont imposées à K par pénalisation :
-    K[i,i] += α (α = K_max × 10¹⁵). Les DDL contraints acquièrent
-    des fréquences parasites très élevées (f ∝ √α) qui n'affectent pas
-    les premiers modes extraits avec ``which="SM"``.
+    **Workflow interne** :
 
-    La matrice de masse M n'est pas modifiée : les DDL contraints ont
-    M[i,i] > 0 (masse physique) et K[i,i] ≈ α → ω² ≈ α/M[i,i] ≫ 1,
-    ce qui les envoie automatiquement en haut du spectre.
+    .. code-block:: text
+
+        K, M ← Assembler.assemble_stiffness(), assemble_mass()
+        ds   ← apply_dirichlet(K, 0, mesh, bc)   [élimination row-zero]
+        K_f  ← ds.K_free   [K_bc[free, free] = K_original[free, free]]
+        M_f  ← ds.reduce_mass(M)   [M[free, free]]
+        ω², φ_f ← eigsh(K_f, M=M_f, sigma=0, which="LM")   [Lanczos]
+        φ   ← ds.recover_modes(φ_f)   [remettre à taille n_dof]
+
+    Le spectre de (K_f, M_f) ne contient aucun mode parasite car les DDL
+    contraints ont été supprimés de la matrice — pas d'artifice de pénalisation.
+
+    Examples
+    --------
+    >>> result = run_modal(mesh, bc, n_modes=5)
+    >>> print(result.freqs)   # [f1, f2, f3, f4, f5] Hz
     """
     assembler = Assembler(mesh)
     K = assembler.assemble_stiffness()
     M = assembler.assemble_mass()
 
-    F_dummy = np.zeros(mesh.n_dof)
-    # penalty_factor réduit pour limiter le conditionnement de K :
-    # α = K_max × 1e8  ≫  ω²_max_physique  (modes parasites à très haute fréquence)
-    # mais α ≪ K_max × 1e15  → condition(K_bc) ≈ 1e8 au lieu de 1e23
-    K_bc, _ = apply_dirichlet(K, F_dummy, mesh, bc, penalty_factor=1e8)
-
+    # Masse condensée appliquée avant la réduction (conservation de la masse)
     if use_lumped:
         M = lumped_mass(M)
 
-    freqs, modes = ModalSolver().solve(K_bc, M, n_modes=n_modes)
-    omega = freqs * (2.0 * np.pi)
-    return ModalResult(freqs=freqs, omega=omega, modes=modes, n_modes=n_modes)
+    F_dummy = np.zeros(mesh.n_dof)
+    # Élimination vraie : K_free = K[free, free], M_free = M[free, free]
+    # Aucun mode parasite (DDL contraints supprimés du spectre).
+    ds = apply_dirichlet(K, F_dummy, mesh, bc)   # method="elimination" par défaut
+    K_free = ds.K_free
+    M_free = ds.reduce_mass(M)
+
+    freqs_free, phi_free = ModalSolver().solve(K_free, M_free, n_modes=n_modes)
+
+    # Reconstruction des modes à la taille complète (zéros aux DDL contraints)
+    phi_full = ds.recover_modes(phi_free)
+
+    omega = freqs_free * (2.0 * np.pi)
+    return ModalResult(
+        freqs=freqs_free,
+        omega=omega,
+        modes=phi_full,
+        n_modes=n_modes,
+    )

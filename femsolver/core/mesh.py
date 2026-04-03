@@ -269,6 +269,47 @@ class DistributedLineLoad:
 
 
 @dataclass(frozen=True)
+class MPCConstraint:
+    """Contrainte linéaire multi-points : Σ aᵢ·u[nœud_i, ddl_i] = β.
+
+    Chaque terme est un triplet ``(node_id, local_dof, coefficient)``.  Le DDL
+    global correspondant est ``mesh.dpn * node_id + local_dof``.
+
+    Convention pour la **méthode d'élimination** :
+
+    - Le **premier terme** est l'esclave (DOF éliminé du système).
+    - Exactement **2 termes** pour l'élimination (1 esclave + 1 maître).
+    - La contrainte est réécrite :
+
+          a_s · u_s + a_m · u_m = β
+          → u_s = (β − a_m · u_m) / a_s = α · u_m + β̃
+
+    Pour la **méthode des multiplicateurs de Lagrange**, tous les termes sont
+    égaux (pas de notion maître/esclave) et le nombre de termes est quelconque.
+
+    Parameters
+    ----------
+    terms : tuple[tuple[int, int, float], ...]
+        Triplets ``(node_id, local_dof, coefficient)``.
+    rhs : float
+        Second membre β de la contrainte (défaut 0).
+
+    Examples
+    --------
+    Liaison rigide horizontale — u_x(nœud 1) = u_x(nœud 3) :
+
+    >>> c = MPCConstraint(terms=((1, 0, 1.0), (3, 0, -1.0)), rhs=0.0)
+
+    Raccord poutre — θ(nœud 1) = θ(nœud 2) :
+
+    >>> c = MPCConstraint(terms=((1, 2, 1.0), (2, 2, -1.0)), rhs=0.0)
+    """
+
+    terms: tuple[tuple[int, int, float], ...]
+    rhs: float = 0.0
+
+
+@dataclass(frozen=True)
 class BoundaryConditions:
     """Conditions aux limites d'un problème posé sur un maillage.
 
