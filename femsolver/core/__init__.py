@@ -1,6 +1,13 @@
 """Noyau mathématique du solveur FEM."""
 
 from femsolver.core.assembler import Assembler
+from femsolver.core.diagnostics import (
+    DiagnosticsResult,
+    check_equilibrium,
+    check_mass,
+    compute_reactions,
+    run_diagnostics,
+)
 from femsolver.core.boundary import apply_dirichlet, DirichletSystem
 from femsolver.core.element import Element
 from femsolver.core.material import ElasticMaterial
@@ -28,6 +35,11 @@ from femsolver.core.solver import ModalSolver, ScipyBackend, SolverBackend, Stat
 
 __all__ = [
     "Assembler",
+    "check_equilibrium",
+    "check_mass",
+    "compute_reactions",
+    "DiagnosticsResult",
+    "run_diagnostics",
     "apply_dirichlet",
     "DirichletSystem",
     "apply_mpc_elimination",
