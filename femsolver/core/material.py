@@ -39,6 +39,11 @@ class ElasticMaterial:
         if self.rho <= 0:
             raise ValueError(f"La densité doit être > 0, reçu rho={self.rho}")
 
+    @property
+    def G(self) -> float:
+        """Module de cisaillement G = E / (2(1+ν)) [Pa]."""
+        return self.E / (2.0 * (1.0 + self.nu))
+
     def elasticity_matrix_plane_stress(self) -> np.ndarray:
         """Matrice de comportement D en contrainte plane (3×3).
 

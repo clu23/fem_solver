@@ -172,6 +172,31 @@ class Section(ABC):
     def z_min(self) -> float:
         """Fibre extrême gauche : z_min < 0 [m] depuis G."""
 
+    @abstractmethod
+    def shear_correction_factor(self, nu: float) -> float:
+        """Facteur de correction de cisaillement de Timoshenko κ [-].
+
+        κ est utilisé pour calculer la rigidité de cisaillement effective :
+        GA_s = G·κ·A.  Dépend de la forme de la section et éventuellement
+        du coefficient de Poisson ν.
+
+        Parameters
+        ----------
+        nu : float
+            Coefficient de Poisson du matériau [-].
+
+        Returns
+        -------
+        float
+            κ ∈ (0, 1].
+
+        References
+        ----------
+        Cowper G.R. (1966), *The Shear Coefficient in Timoshenko's Beam
+        Theory*, J. Appl. Mech. 33(2), 335–340.
+        """
+        raise NotImplementedError  # pragma: no cover
+
     # ── Propriétés dérivées (concrètes) ──────────────────────────────────────
 
     @property
@@ -397,6 +422,13 @@ class CircularSection(Section):
     def z_min(self) -> float:
         return -self.radius
 
+    def shear_correction_factor(self, nu: float) -> float:
+        """κ pour section circulaire pleine — Cowper (1966), Eq. 28.
+
+        κ = 6(1+ν) / (7+6ν)
+        """
+        return 6.0 * (1.0 + nu) / (7.0 + 6.0 * nu)
+
     def _draw_patches(self, ax: "Axes", *, color: str, alpha: float) -> None:
         import matplotlib.patches as mpatches
         circle = mpatches.Circle(
@@ -485,6 +517,22 @@ class HollowCircularSection(Section):
     @property
     def z_min(self) -> float:
         return -self.outer_radius
+
+    def shear_correction_factor(self, nu: float) -> float:
+        """κ pour section circulaire creuse — Cowper (1966), Eq. 29.
+
+        Avec m = r_i / r_o :
+
+            κ = 6(1+ν)(1+m²)² / [(7+6ν)(1+m²)² + (20+12ν)m²]
+
+        Limite m → 0 (section pleine) : κ → 6(1+ν)/(7+6ν)  (formule circulaire).
+        Limite m → 1 (paroi très mince) : κ → 2(1+ν)/(4+3ν).
+        """
+        m = self.inner_radius / self.outer_radius
+        m2 = m * m
+        num = 6.0 * (1.0 + nu) * (1.0 + m2) ** 2
+        den = (7.0 + 6.0 * nu) * (1.0 + m2) ** 2 + (20.0 + 12.0 * nu) * m2
+        return num / den
 
     def _draw_patches(self, ax: "Axes", *, color: str, alpha: float) -> None:
         import matplotlib.patches as mpatches
@@ -677,6 +725,16 @@ class RectangularSection(RectangleBasedSection):
         ratio = h / b
         return (b * h ** 3 / 3.0) * (1.0 - 0.63 * ratio + 0.052 * ratio ** 5)
 
+    def shear_correction_factor(self, nu: float) -> float:
+        """κ pour section rectangulaire pleine — Cowper (1966), Eq. 30.
+
+        κ = 10(1+ν) / (12+11ν)
+
+        Indépendant du rapport h/b (valide pour toute section rectangulaire
+        pleine soumise à un cisaillement uniforme dans la direction de h).
+        """
+        return 10.0 * (1.0 + nu) / (12.0 + 11.0 * nu)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Section rectangulaire creuse (RHS)
@@ -795,6 +853,20 @@ class HollowRectangularSection(Section):
         ax.add_patch(inner)
         ax.autoscale_view()
 
+    def shear_correction_factor(self, nu: float) -> float:
+        """κ pour section rectangulaire creuse (RHS) — méthode de l'âme.
+
+        La force tranchante est reprise par les deux âmes verticales
+        (épaisseur t, hauteur H extérieure) :
+
+            A_s = 2 · t · H
+            κ = A_s / A
+
+        Cette approximation est conservative et couramment utilisée
+        en bureau d'études (Eurocode 3).  Indépendant de ν.
+        """
+        return 2.0 * self.thickness * self.outer_height / self.area
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Profilé en I (IPE, HEA, HEB, …)
@@ -869,6 +941,19 @@ class ISection(RectangleBasedSection):
             _Rect(y_c=+(h - t_f) / 2.0, z_c=0.0, h=t_f, b=b_f),        # aile haut
             _Rect(y_c=-(h - t_f) / 2.0, z_c=0.0, h=t_f, b=b_f),        # aile bas
         ]
+
+    def shear_correction_factor(self, nu: float) -> float:
+        """κ pour profilé en I — méthode de l'âme.
+
+        La force tranchante verticale est intégralement reprise par l'âme :
+
+            A_web = t_w · h_w   (h_w = h − 2·t_f)
+            κ = A_web / A
+
+        Approximation courante (Eurocode 3, AISC).  Indépendant de ν.
+        """
+        h_w = self.height - 2.0 * self.flange_thickness
+        return self.web_thickness * h_w / self.area
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -950,6 +1035,19 @@ class CSection(RectangleBasedSection):
             _Rect(y_c=t_f / 2.0,        z_c=b_f / 2.0,  h=t_f, b=b_f),  # aile bas
         ]
 
+    def shear_correction_factor(self, nu: float) -> float:
+        """κ pour profilé en C — méthode de l'âme.
+
+        Comme pour le profilé en I :
+
+            A_web = t_w · h_w   (h_w = h − 2·t_f)
+            κ = A_web / A
+
+        Indépendant de ν.
+        """
+        h_w = self.height - 2.0 * self.flange_thickness
+        return self.web_thickness * h_w / self.area
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Cornière L
@@ -1024,3 +1122,17 @@ class LSection(RectangleBasedSection):
             _Rect(y_c=h / 2.0,    z_c=t / 2.0,            h=h,   b=t),    # aile verticale
             _Rect(y_c=t / 2.0,    z_c=t + (b - t) / 2.0,  h=t,   b=b-t), # aile horizontale
         ]
+
+    def shear_correction_factor(self, nu: float) -> float:
+        """κ pour cornière L — formule rectangulaire (Cowper 1966, Eq. 30).
+
+        La cornière L est traitée comme un rectangle équivalent pour le
+        calcul de κ.  Pour la flexion dans le plan xy (forte), l'aile
+        verticale (h × t) porte l'essentiel du cisaillement.
+
+            κ = 10(1+ν) / (12+11ν)
+
+        C'est une approximation conservative couramment utilisée pour les
+        sections ouvertes à paroi mince de forme complexe.
+        """
+        return 10.0 * (1.0 + nu) / (12.0 + 11.0 * nu)
