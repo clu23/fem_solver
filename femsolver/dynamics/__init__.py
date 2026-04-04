@@ -14,6 +14,16 @@ from femsolver.dynamics.harmonic import (
     solve_harmonic_hysteretic,
     solve_harmonic_modal,
 )
+from femsolver.dynamics.transient import (
+    NEWMARK_CENTRAL_DIFF,
+    NEWMARK_FOX_GOODWIN,
+    NEWMARK_LINEAR_ACCEL,
+    NEWMARK_TRAPEZOIDAL,
+    NewmarkBeta,
+    TransientResult,
+    run_transient,
+    solve_newmark,
+)
 
 __all__ = [
     "ModalResult",
@@ -29,4 +39,12 @@ __all__ = [
     "solve_harmonic",
     "solve_harmonic_hysteretic",
     "solve_harmonic_modal",
+    "NewmarkBeta",
+    "NEWMARK_TRAPEZOIDAL",
+    "NEWMARK_CENTRAL_DIFF",
+    "NEWMARK_FOX_GOODWIN",
+    "NEWMARK_LINEAR_ACCEL",
+    "TransientResult",
+    "solve_newmark",
+    "run_transient",
 ]
