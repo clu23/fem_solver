@@ -317,6 +317,150 @@ class Quad4(Element):
 
         return M_e * (material.rho * t)
 
+    # ------------------------------------------------------------------
+    # Interface batch (vectorisation sur N_e éléments simultanément)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def batch_stiffness_matrix(
+        cls,
+        nodes_batch: np.ndarray,
+        D: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Matrices de rigidité pour N_e Quad4 en une seule passe tenseur.
+
+        Remplace N_e appels à ``stiffness_matrix()`` par un calcul batch
+        vectorisé sans boucle Python sur les éléments.
+
+        Parameters
+        ----------
+        nodes_batch : np.ndarray, shape (N_e, 4, 2)
+            Coordonnées nodales de tous les éléments du groupe.
+        D : np.ndarray, shape (3, 3)
+            Matrice d'élasticité (identique pour tous les éléments du groupe).
+        t : float
+            Épaisseur [m] (identique pour tous les éléments du groupe).
+
+        Returns
+        -------
+        K_e_all : np.ndarray, shape (N_e, 8, 8)
+            Matrices de rigidité élémentaires pour les N_e éléments.
+
+        Notes
+        -----
+        Algorithme :
+
+        1. ``dN_nat`` (4_gp, 2, 4) — dérivées en coordonnées naturelles,
+           constantes (ne dépendent pas de la géométrie).
+        2. Jacobiens batch : ``J = einsum('gin,enj->geij', dN_nat, nodes_batch)``
+           → (4_gp, N_e, 2, 2).
+        3. ``det_J``, ``J_inv`` via ``np.linalg.det/inv`` qui broadcast nativement.
+        4. Dérivées physiques : ``dN_phys = einsum('geij,gjn->gein', J_inv, dN_nat)``
+           → (4_gp, N_e, 2, 4).
+        5. Matrices B (4_gp, N_e, 3, 8) par assignation vectorisée sur les 4 nœuds.
+        6. ``K_e = t · einsum('g,ge,gepi,pq,geqj->eij', w, det_J, B, D, B)``
+           → (N_e, 8, 8).
+        """
+        n_e = nodes_batch.shape[0]
+        gp = _GP
+        xi_eta_w = np.array([
+            [-gp, -gp, 1.0],
+            [ gp, -gp, 1.0],
+            [ gp,  gp, 1.0],
+            [-gp,  gp, 1.0],
+        ])   # (4, 3)
+
+        # dN/dξ, dN/dη aux 4 points de Gauss : (4, 2, 4) — constant
+        dN_nat = np.stack([
+            cls._shape_function_derivatives(xi, eta)
+            for xi, eta, _ in xi_eta_w
+        ])   # (4_gp, 2, 4)
+        w = xi_eta_w[:, 2]   # (4,)
+
+        # Jacobiens batch : J[g,e] = dN_nat[g] @ nodes_batch[e]
+        # (4,2,4) × (N_e,4,2) → (4, N_e, 2, 2)
+        J = np.einsum('gin,enj->geij', dN_nat, nodes_batch)
+        det_J = np.linalg.det(J)        # (4, N_e)
+        J_inv = np.linalg.inv(J)        # (4, N_e, 2, 2)
+
+        # Dérivées physiques : dN_phys[g,e] = J_inv[g,e] @ dN_nat[g]
+        # (4,N_e,2,2) × (4,2,4) → (4, N_e, 2, 4)
+        dN_phys = np.einsum('geij,gjn->gein', J_inv, dN_nat)
+
+        # Matrices B : (4_gp, N_e, 3, 8)
+        B = np.zeros((4, n_e, 3, 8))
+        for i in range(4):
+            B[:, :, 0, 2 * i]     = dN_phys[:, :, 0, i]   # ∂Ni/∂x → εxx
+            B[:, :, 1, 2 * i + 1] = dN_phys[:, :, 1, i]   # ∂Ni/∂y → εyy
+            B[:, :, 2, 2 * i]     = dN_phys[:, :, 1, i]   # ∂Ni/∂y → γxy
+            B[:, :, 2, 2 * i + 1] = dN_phys[:, :, 0, i]   # ∂Ni/∂x → γxy
+
+        # K_e = t · Σ_g w_g · |det_J[g,e]| · B[g,e]^T · D · B[g,e]
+        # einsum indices : g=Gauss, e=elem, p/q=stress(3), i/j=dof(8)
+        K_e_all = np.einsum('g,ge,gepi,pq,geqj->eij', w, det_J, B, D, B) * t
+        return K_e_all   # (N_e, 8, 8)
+
+    @classmethod
+    def batch_mass_matrix(
+        cls,
+        nodes_batch: np.ndarray,
+        rho: float,
+        t: float,
+    ) -> np.ndarray:
+        """Matrices de masse pour N_e Quad4 en une seule passe tenseur.
+
+        Parameters
+        ----------
+        nodes_batch : np.ndarray, shape (N_e, 4, 2)
+            Coordonnées nodales des N_e éléments.
+        rho : float
+            Masse volumique [kg/m³] (identique pour tout le groupe).
+        t : float
+            Épaisseur [m].
+
+        Returns
+        -------
+        M_e_all : np.ndarray, shape (N_e, 8, 8)
+
+        Notes
+        -----
+        NtN[g] = N_mat[g]^T @ N_mat[g] est une constante (ne dépend que
+        de ξ,η, pas de la géométrie) : précomputation hors de toute boucle.
+
+            M_e = ρ·t · einsum('g,ge,gij->eij', w, det_J, NtN)
+        """
+        gp = _GP
+        xi_eta_w = np.array([
+            [-gp, -gp, 1.0],
+            [ gp, -gp, 1.0],
+            [ gp,  gp, 1.0],
+            [-gp,  gp, 1.0],
+        ])
+        w = xi_eta_w[:, 2]
+
+        # NtN[g] = N_mat[g]^T @ N_mat[g] : (4, 8, 8) — constant, indépendant des nœuds
+        NtN = np.zeros((4, 8, 8))
+        for g, (xi, eta, _) in enumerate(xi_eta_w):
+            Nv = cls._shape_functions(xi, eta)   # (4,)
+            N_mat = np.zeros((2, 8))
+            for i in range(4):
+                N_mat[0, 2 * i]     = Nv[i]
+                N_mat[1, 2 * i + 1] = Nv[i]
+            NtN[g] = N_mat.T @ N_mat   # (8, 8)
+
+        # Jacobiens batch (pour det_J uniquement — même calcul que batch_stiffness)
+        dN_nat = np.stack([
+            cls._shape_function_derivatives(xi, eta)
+            for xi, eta, _ in xi_eta_w
+        ])
+        J = np.einsum('gin,enj->geij', dN_nat, nodes_batch)
+        det_J = np.linalg.det(J)   # (4, N_e)
+
+        # M_e = ρ·t · Σ_g w_g · det_J[g,e] · NtN[g]
+        M_e_all = np.einsum('g,ge,gij->eij', w, det_J, NtN) * (rho * t)
+        return M_e_all   # (N_e, 8, 8)
+
     def body_force_vector(
         self,
         material: ElasticMaterial,

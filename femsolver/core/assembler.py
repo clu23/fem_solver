@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections import defaultdict
+
 import numpy as np
 from scipy.sparse import coo_matrix, csr_matrix
 
@@ -260,6 +262,62 @@ def _pressure_nodal_force_3d_quad(
     return mesh.global_dofs(ids), f_face
 
 
+# ---------------------------------------------------------------------------
+# Helpers batch (vectorisation multi-éléments)
+# ---------------------------------------------------------------------------
+
+
+def _group_elements_for_batch(
+    mesh,
+) -> dict[tuple, list]:
+    """Regroupe les éléments par (type, matériau, propriétés) pour le batch.
+
+    Seuls les éléments partageant le même type, le même matériau et les mêmes
+    propriétés géométriques peuvent être traités en une seule passe tenseur
+    (D identique, même structure de K_e).
+
+    Parameters
+    ----------
+    mesh : Mesh
+
+    Returns
+    -------
+    dict mapping ``(elem_class, material, frozenset_props)`` →
+    ``list[ElementData]``.
+    """
+    groups: dict[tuple, list] = defaultdict(list)
+    for elem_data in mesh.elements:
+        props_key = frozenset(elem_data.properties.items()) if elem_data.properties else frozenset()
+        key = (type(elem_data.get_element()), elem_data.material, props_key)
+        groups[key].append(elem_data)
+    return dict(groups)
+
+
+def _scatter_coo_batch(
+    K_e_all: np.ndarray,
+    dofs_all: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Convertit N_e matrices élémentaires en triplets COO vectorisés.
+
+    Parameters
+    ----------
+    K_e_all : np.ndarray, shape (N_e, n_dof_e, n_dof_e)
+        Matrices élémentaires calculées en batch.
+    dofs_all : np.ndarray, shape (N_e, n_dof_e)
+        Indices globaux des DDL pour chaque élément.
+
+    Returns
+    -------
+    rows, cols, vals : np.ndarray, shape (N_e * n_dof_e²,)
+        Triplets COO pour l'assemblage global.
+    """
+    n_e, n_dof_e = dofs_all.shape
+    rows = np.broadcast_to(dofs_all[:, :, np.newaxis], (n_e, n_dof_e, n_dof_e)).ravel()
+    cols = np.broadcast_to(dofs_all[:, np.newaxis, :], (n_e, n_dof_e, n_dof_e)).ravel()
+    vals = K_e_all.ravel()
+    return rows, cols, vals
+
+
 class Assembler:
     """Assemble les matrices globales K, M et le vecteur F à partir d'un maillage.
 
@@ -282,8 +340,17 @@ class Assembler:
     def __init__(self, mesh: Mesh) -> None:
         self.mesh = mesh
 
-    def assemble_stiffness(self) -> csr_matrix:
+    def assemble_stiffness(self, use_batch: bool = True) -> csr_matrix:
         """Assemble la matrice de rigidité globale K (format CSR).
+
+        Parameters
+        ----------
+        use_batch : bool
+            Si ``True`` (défaut), utilise le chemin batch vectorisé pour les
+            types d'éléments qui exposent ``batch_stiffness_matrix()``.
+            Les autres éléments utilisent toujours le chemin scalaire.
+            Passer ``False`` force le chemin scalaire pour tous les éléments
+            (utile pour vérification ou débogage).
 
         Returns
         -------
@@ -294,28 +361,99 @@ class Assembler:
         -----
         Le pattern COO → CSR permet l'addition automatique des contributions
         en DDL partagés entre éléments adjacents.
+
+        En mode batch, le scatter COO est également vectorisé (pas de double
+        boucle Python sur les indices i, j).
         """
         mesh = self.mesh
         n_dof = mesh.n_dof
-        rows: list[int] = []
-        cols: list[int] = []
-        vals: list[float] = []
+        rows_list: list[np.ndarray] = []
+        cols_list: list[np.ndarray] = []
+        vals_list: list[np.ndarray] = []
 
-        for elem_data in mesh.elements:
+        if use_batch:
+            groups = _group_elements_for_batch(mesh)
+            for (elem_class, material, _), elem_group in groups.items():
+                if hasattr(elem_class, 'batch_stiffness_matrix'):
+                    self._assemble_stiffness_batch(
+                        elem_group, material, rows_list, cols_list, vals_list,
+                    )
+                else:
+                    self._assemble_stiffness_scalar(
+                        elem_group, rows_list, cols_list, vals_list,
+                    )
+        else:
+            self._assemble_stiffness_scalar(
+                list(mesh.elements), rows_list, cols_list, vals_list,
+            )
+
+        rows = np.concatenate(rows_list) if rows_list else np.array([], dtype=int)
+        cols = np.concatenate(cols_list) if cols_list else np.array([], dtype=int)
+        vals = np.concatenate(vals_list) if vals_list else np.array([], dtype=float)
+        return coo_matrix((vals, (rows, cols)), shape=(n_dof, n_dof)).tocsr()
+
+    def _assemble_stiffness_batch(
+        self,
+        elem_group: list,
+        material,
+        rows_list: list,
+        cols_list: list,
+        vals_list: list,
+    ) -> None:
+        """Chemin batch : calcule toutes les K_e du groupe en un tenseur."""
+        mesh = self.mesh
+        elem_class = type(elem_group[0].get_element())
+        props = elem_group[0].properties
+
+        t = props["thickness"]
+        formulation = props.get("formulation", "plane_stress")
+        if formulation == "plane_stress":
+            D = material.elasticity_matrix_plane_stress()
+        else:
+            D = material.elasticity_matrix_plane_strain()
+
+        nodes_batch = np.stack([
+            mesh.node_coords(ed.node_ids) for ed in elem_group
+        ])   # (N_e, n_nodes, n_dim)
+
+        K_e_all = elem_class.batch_stiffness_matrix(nodes_batch, D, t)   # (N_e, n_dof_e, n_dof_e)
+
+        dofs_all = np.array([
+            mesh.global_dofs(ed.node_ids) for ed in elem_group
+        ])   # (N_e, n_dof_e)
+
+        r, c, v = _scatter_coo_batch(K_e_all, dofs_all)
+        rows_list.append(r)
+        cols_list.append(c)
+        vals_list.append(v)
+
+    def _assemble_stiffness_scalar(
+        self,
+        elem_group: list,
+        rows_list: list,
+        cols_list: list,
+        vals_list: list,
+    ) -> None:
+        """Chemin scalaire (fallback) : une K_e à la fois."""
+        mesh = self.mesh
+        for elem_data in elem_group:
             elem = elem_data.get_element()
             node_coords = mesh.node_coords(elem_data.node_ids)
             K_e = elem.stiffness_matrix(elem_data.material, node_coords, elem_data.properties)
-            dofs = mesh.global_dofs(elem_data.node_ids)
-            for i, di in enumerate(dofs):
-                for j, dj in enumerate(dofs):
-                    rows.append(di)
-                    cols.append(dj)
-                    vals.append(K_e[i, j])
+            dofs = np.array(mesh.global_dofs(elem_data.node_ids))
+            r, c, v = _scatter_coo_batch(K_e[np.newaxis], dofs[np.newaxis])
+            rows_list.append(r)
+            cols_list.append(c)
+            vals_list.append(v)
 
-        return coo_matrix((vals, (rows, cols)), shape=(n_dof, n_dof)).tocsr()
-
-    def assemble_mass(self) -> csr_matrix:
+    def assemble_mass(self, use_batch: bool = True) -> csr_matrix:
         """Assemble la matrice de masse globale M consistante (format CSR).
+
+        Parameters
+        ----------
+        use_batch : bool
+            Si ``True`` (défaut), utilise le chemin batch vectorisé pour les
+            types d'éléments qui exposent ``batch_mass_matrix()``.
 
         Returns
         -------
@@ -324,22 +462,78 @@ class Assembler:
         """
         mesh = self.mesh
         n_dof = mesh.n_dof
-        rows: list[int] = []
-        cols: list[int] = []
-        vals: list[float] = []
+        rows_list: list[np.ndarray] = []
+        cols_list: list[np.ndarray] = []
+        vals_list: list[np.ndarray] = []
 
-        for elem_data in mesh.elements:
+        if use_batch:
+            groups = _group_elements_for_batch(mesh)
+            for (elem_class, material, _), elem_group in groups.items():
+                if hasattr(elem_class, 'batch_mass_matrix'):
+                    self._assemble_mass_batch(
+                        elem_group, material, rows_list, cols_list, vals_list,
+                    )
+                else:
+                    self._assemble_mass_scalar(
+                        elem_group, rows_list, cols_list, vals_list,
+                    )
+        else:
+            self._assemble_mass_scalar(
+                list(mesh.elements), rows_list, cols_list, vals_list,
+            )
+
+        rows = np.concatenate(rows_list) if rows_list else np.array([], dtype=int)
+        cols = np.concatenate(cols_list) if cols_list else np.array([], dtype=int)
+        vals = np.concatenate(vals_list) if vals_list else np.array([], dtype=float)
+        return coo_matrix((vals, (rows, cols)), shape=(n_dof, n_dof)).tocsr()
+
+    def _assemble_mass_batch(
+        self,
+        elem_group: list,
+        material,
+        rows_list: list,
+        cols_list: list,
+        vals_list: list,
+    ) -> None:
+        """Chemin batch pour la matrice de masse."""
+        mesh = self.mesh
+        elem_class = type(elem_group[0].get_element())
+        props = elem_group[0].properties
+        t = props["thickness"]
+
+        nodes_batch = np.stack([
+            mesh.node_coords(ed.node_ids) for ed in elem_group
+        ])
+
+        M_e_all = elem_class.batch_mass_matrix(nodes_batch, material.rho, t)
+
+        dofs_all = np.array([
+            mesh.global_dofs(ed.node_ids) for ed in elem_group
+        ])
+
+        r, c, v = _scatter_coo_batch(M_e_all, dofs_all)
+        rows_list.append(r)
+        cols_list.append(c)
+        vals_list.append(v)
+
+    def _assemble_mass_scalar(
+        self,
+        elem_group: list,
+        rows_list: list,
+        cols_list: list,
+        vals_list: list,
+    ) -> None:
+        """Chemin scalaire (fallback) pour la matrice de masse."""
+        mesh = self.mesh
+        for elem_data in elem_group:
             elem = elem_data.get_element()
             node_coords = mesh.node_coords(elem_data.node_ids)
             M_e = elem.mass_matrix(elem_data.material, node_coords, elem_data.properties)
-            dofs = mesh.global_dofs(elem_data.node_ids)
-            for i, di in enumerate(dofs):
-                for j, dj in enumerate(dofs):
-                    rows.append(di)
-                    cols.append(dj)
-                    vals.append(M_e[i, j])
-
-        return coo_matrix((vals, (rows, cols)), shape=(n_dof, n_dof)).tocsr()
+            dofs = np.array(mesh.global_dofs(elem_data.node_ids))
+            r, c, v = _scatter_coo_batch(M_e[np.newaxis], dofs[np.newaxis])
+            rows_list.append(r)
+            cols_list.append(c)
+            vals_list.append(v)
 
     def assemble_forces(self, bc: BoundaryConditions) -> np.ndarray:
         """Assemble le vecteur de forces nodales F à partir des conditions aux limites.
