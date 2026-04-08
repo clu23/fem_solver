@@ -38,13 +38,18 @@ from __future__ import annotations
 
 import numpy as np
 
+import logging
+
 from femsolver.core.assembler import Assembler
 from femsolver.core.boundary import apply_dirichlet
+from femsolver.core.diagnostics import run_diagnostics
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.core.solver import StaticSolver
 from femsolver.elements.bar2d import Bar2D
 from femsolver.postprocess.plotter2d import plot_truss
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
 
 
 def main() -> None:
@@ -104,6 +109,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     assembler = Assembler(mesh)
     K = assembler.assemble_stiffness()
+    M = assembler.assemble_mass()
     F_vec = assembler.assemble_forces(bc)
     K_bc, F_bc = apply_dirichlet(K, F_vec, mesh, bc)
     u = StaticSolver().solve(K_bc, F_bc)
@@ -146,6 +152,11 @@ def main() -> None:
     for name, N in zip(bar_names, axial_forces):
         status = "TRACTION" if N > 0 else "COMPRESSION"
         print(f"  {name:<22} : {N/1e3:+8.2f} kN  ({status})")
+
+    # ------------------------------------------------------------------
+    # Diagnostics : masse, réactions, bilan d'équilibre
+    # ------------------------------------------------------------------
+    run_diagnostics(mesh, K, u, F_vec, bc, M=M)
 
     # ------------------------------------------------------------------
     # Visualisation (amplification × 1000 pour voir la déformée)
