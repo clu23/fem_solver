@@ -505,6 +505,117 @@ class Hexa8(Element):
 
         return M_e * material.rho
 
+    def stiffness_matrix_sri(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+    ) -> np.ndarray:
+        """Matrice de rigidité par intégration réduite sélective (SRI) 24×24.
+
+        Formulation de Hughes (1980) — split dilatation / déviatorique :
+
+        * **D_dev** (partie déviatorique — contraintes à trace nulle + cisaillement) :
+          intégrée avec **2×2×2** points de Gauss (ordre complet).
+          Contient la réponse 2μ deviatoric + tous les termes de cisaillement μ.
+
+        * **D_vol** (partie volumétrique pure — K_bulk · m·mᵀ) :
+          intégrée avec **1 point** au centre (ξ=η=ζ=0), poids = 8.
+          Cible le *volumetric locking* des matériaux quasi-incompressibles.
+
+        K_e = K_dev + K_vol
+
+        avec ::
+
+            K_dev = Σ_{2×2×2} wₚ · Bₚᵀ · D_dev · Bₚ · |det Jₚ|   (ordre complet)
+            K_vol = 8 · Bc^T · D_vol · Bc · |det Jc|               (1 point central)
+
+        Décomposition de D
+        ------------------
+        Constante de Lamé bulk : K = λ + 2μ/3 = E / (3(1−2ν))
+
+            D_vol = K · m · mᵀ          m = [1,1,1,0,0,0]ᵀ
+            D_dev = D − D_vol
+
+        D = D_dev + D_vol (partition exacte).
+
+        Absence de modes hourglass
+        --------------------------
+        K_dev est calculé en 2×2×2 complet : il a rang 18 seul.
+        L'ajout de K_vol (rang 1) ne peut qu'augmenter le rang → pas de modes
+        zéro-énergie introduits par la réduction.
+
+        Contraste avec Quad4
+        ---------------------
+        Pour Quad4, le split est membrane (2×2) / cisaillement (1 pt) et cible
+        le *shear locking* en flexion.  Pour Hexa8, le split dilatation/déviatorique
+        de Hughes cible le *volumetric locking*.  Le shear locking en flexion 3D
+        nécessite des méthodes avancées (ANS/EAS).
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (E, nu).
+        nodes : np.ndarray, shape (8, 3)
+            Coordonnées nodales.
+        properties : dict
+            Non utilisé pour Hexa8 (peut être ``{}``).
+
+        Returns
+        -------
+        K_e : np.ndarray, shape (24, 24)
+            Matrice de rigidité SRI symétrique.
+
+        References
+        ----------
+        Hughes, T.J.R. (1980). Generalization of selective integration procedures
+        to anisotropic and nonlinear media. *Int. J. Num. Meth. Engng*, 15, 1413–1418.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from femsolver.core.material import ElasticMaterial
+        >>> mat = ElasticMaterial(E=210e9, nu=0.3, rho=7800)
+        >>> nodes = np.array([
+        ...     [0.,0.,0.],[1.,0.,0.],[1.,1.,0.],[0.,1.,0.],
+        ...     [0.,0.,1.],[1.,0.,1.],[1.,1.,1.],[0.,1.,1.],
+        ... ])
+        >>> K_sri = Hexa8().stiffness_matrix_sri(mat, nodes, {})
+        >>> K_sri.shape
+        (24, 24)
+        """
+        if nodes.shape != (8, 3):
+            raise ValueError(
+                f"Hexa8 attend nodes.shape == (8, 3), reçu {nodes.shape}"
+            )
+
+        D = material.elasticity_matrix_3d()
+
+        # --- Décomposition de D selon Hughes (1980) -----------------------
+        # K_bulk = λ + 2μ/3 = E / (3(1-2ν))  [module de compressibilité 3D]
+        E, nu = material.E, material.nu
+        K_bulk = E / (3.0 * (1.0 - 2.0 * nu))
+
+        # D_vol = K_bulk · m · mᵀ  où  m = [1,1,1,0,0,0]ᵀ
+        # Seul le bloc 3×3 supérieur gauche est non nul (tous les termes = K_bulk)
+        D_vol = np.zeros((6, 6))
+        D_vol[:3, :3] = K_bulk   # m·mᵀ top-left = ones(3,3) × K_bulk
+
+        # D_dev = D − D_vol  (partie déviatorique + cisaillement)
+        D_dev = D - D_vol
+
+        # --- Partie déviatorique : intégration 2×2×2 (ordre complet) -----
+        K_dev = np.zeros((24, 24))
+        for xi, eta, zeta, w in _GAUSS_POINTS_2X2X2:
+            B, det_J = self._strain_displacement_matrix(xi, eta, zeta, nodes)
+            K_dev += w * (B.T @ D_dev @ B) * det_J
+
+        # --- Partie volumétrique : 1 point au centre (poids = 8) ---------
+        B_c, det_J_c = self._strain_displacement_matrix(0.0, 0.0, 0.0, nodes)
+        K_vol = 8.0 * (B_c.T @ D_vol @ B_c) * det_J_c
+
+        return K_dev + K_vol
+
     def body_force_vector(
         self,
         material: ElasticMaterial,

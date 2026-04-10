@@ -461,6 +461,99 @@ class Quad4(Element):
         M_e_all = np.einsum('g,ge,gij->eij', w, det_J, NtN) * (rho * t)
         return M_e_all   # (N_e, 8, 8)
 
+    def stiffness_matrix_sri(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+    ) -> np.ndarray:
+        """Matrice de rigidité par intégration réduite sélective (SRI) 8×8.
+
+        Élimine le *shear locking* en flexion sans introduire de modes
+        hourglass en séparant D en deux contributions :
+
+        * **D_dil** (partie dilatation/membrane — εxx, εyy) :
+          intégrée avec 2×2 points de Gauss (ordre complet).  Cette partie
+          garantit le rang correct de K_e et bloque les modes hourglass.
+
+        * **D_dev** (partie déviatorique/cisaillement — γxy, G = D[2,2]) :
+          intégrée avec **1 point** au centre (ξ=0, η=0), poids = 4.
+          En flexion pure, γxy = 0 au centre d'un élément rectangulaire,
+          donc la rigidité parasitaire de cisaillement est annulée.
+
+        K_e = K_dil + K_dev
+
+        avec ::
+
+            K_dil = t · Σ_{2×2} wₚ · Bₚᵀ · D_dil · Bₚ · |det Jₚ|
+            K_dev = t · 4 · Bc^T · D_dev · Bc · |det Jc|   (1 point central)
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (E, nu).
+        nodes : np.ndarray, shape (4, 2)
+            Coordonnées nodales.
+        properties : dict
+            ``"thickness"`` : épaisseur [m].
+            ``"formulation"`` : ``"plane_stress"`` (défaut) ou
+            ``"plane_strain"``.
+
+        Returns
+        -------
+        K_e : np.ndarray, shape (8, 8)
+            Matrice de rigidité SRI symétrique.
+
+        Notes
+        -----
+        Référence : Hughes, « The FEM », §4.5 (selective/reduced integration).
+        Zienkiewicz & Taylor, vol. 1, §9.9 (méthode de split dilatation/déviatoire).
+
+        Pour un état de contrainte uniforme (patch test), K_dil · u_e + K_dev · u_e
+        donne les mêmes forces nodales que l'intégration complète, donc le
+        patch test en traction et en cisaillement pur passe exactement.
+
+        Examples
+        --------
+        >>> import numpy as np
+        >>> from femsolver.core.material import ElasticMaterial
+        >>> mat = ElasticMaterial(E=1.0, nu=0.0, rho=1.0)
+        >>> nodes = np.array([[0.,0.],[1.,0.],[1.,1.],[0.,1.]])
+        >>> K_sri = Quad4().stiffness_matrix_sri(mat, nodes, {"thickness": 1.0})
+        >>> K_sri.shape
+        (8, 8)
+        """
+        t = properties["thickness"]
+        formulation = properties.get("formulation", "plane_stress")
+
+        if t <= 0:
+            raise ValueError(f"L'épaisseur doit être > 0, reçu thickness={t}")
+        if nodes.shape != (4, 2):
+            raise ValueError(f"Quad4 attend nodes.shape == (4, 2), reçu {nodes.shape}")
+
+        D = self._elasticity_matrix(material, formulation)
+
+        # --- Décomposition de D -------------------------------------------
+        # D_dil : partie dilatation/membrane (εxx, εyy) — intégrée en 2×2
+        D_dil = np.zeros((3, 3))
+        D_dil[:2, :2] = D[:2, :2]
+
+        # D_dev : partie déviatorique/cisaillement (γxy = G) — intégrée en 1 pt
+        D_dev = np.zeros((3, 3))
+        D_dev[2, 2] = D[2, 2]   # G = E/(2(1+ν)) pour plane_stress
+
+        # --- Partie dilatation : intégration 2×2 ---------------------------
+        K_dil = np.zeros((8, 8))
+        for xi, eta, w in _GAUSS_POINTS_2X2:
+            B, det_J = self._strain_displacement_matrix(xi, eta, nodes)
+            K_dil += w * (B.T @ D_dil @ B) * det_J
+
+        # --- Partie déviatorique : 1 point au centre (poids = 4) -----------
+        B_c, det_J_c = self._strain_displacement_matrix(0.0, 0.0, nodes)
+        K_dev = 4.0 * (B_c.T @ D_dev @ B_c) * det_J_c
+
+        return (K_dil + K_dev) * t
+
     def body_force_vector(
         self,
         material: ElasticMaterial,
