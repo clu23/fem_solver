@@ -22,7 +22,9 @@ Tu travailles sur **fem-solver**, un solveur mécanique par éléments finis éc
 Toujours utiliser le venv du projet :
 - Python : .venv/bin/python3
 - Tests : .venv/bin/python3 -m pytest tests/ -v
-- Ne jamais chercher d'autre interpréteur Python.
+- Installation : .venv/bin/pip install
+- Ne jamais chercher d'autre interpréteur Python sur le système.
+- Ne jamais utiliser python3.8, python3.11, ou un Python Windows (mnt/c/...).
 
 ## Conventions de code
 
