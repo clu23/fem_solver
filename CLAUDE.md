@@ -18,6 +18,12 @@ Tu travailles sur **fem-solver**, un solveur mécanique par éléments finis éc
 
 ---
 
+## Environnement Python
+Toujours utiliser le venv du projet :
+- Python : .venv/bin/python3
+- Tests : .venv/bin/python3 -m pytest tests/ -v
+- Ne jamais chercher d'autre interpréteur Python.
+
 ## Conventions de code
 
 ### Style général

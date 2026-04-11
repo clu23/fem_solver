@@ -531,3 +531,125 @@ class Tri6(Element):
         """
         D = self._elasticity_matrix(material, formulation)
         return D @ self.strain(nodes, u_e, xi, eta)
+
+    # ------------------------------------------------------------------
+    # Interface batch (vectorisation sur N_e éléments simultanément)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def batch_stiffness_matrix(
+        cls,
+        nodes_batch: np.ndarray,
+        D: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Matrices de rigidité pour N_e Tri6 en une seule passe tenseur.
+
+        Parameters
+        ----------
+        nodes_batch : np.ndarray, shape (N_e, 6, 2)
+            Coordonnées nodales de tous les éléments du groupe.
+        D : np.ndarray, shape (3, 3)
+            Matrice d'élasticité (identique pour tout le groupe).
+        t : float
+            Épaisseur [m] (identique pour tout le groupe).
+
+        Returns
+        -------
+        K_e_all : np.ndarray, shape (N_e, 12, 12)
+            Matrices de rigidité élémentaires.
+
+        Notes
+        -----
+        Même structure tensorielle que le Quad4 batch, avec les 6 points de
+        Gauss-Dunavant à la place des 4 points 2×2.
+
+        1. ``dN_nat`` (6_gp, 2, 6) — dérivées naturelles (constantes).
+        2. ``J = einsum('gin,enj->geij', dN_nat, nodes)`` → (6, N_e, 2, 2).
+        3. ``dN_phys = einsum('geij,gjn->gein', J_inv, dN_nat)``
+           → (6, N_e, 2, 6).
+        4. Matrices B (6_gp, N_e, 3, 12).
+        5. ``K_e = t · einsum('g,ge,gepi,pq,geqj->eij', w, det_J, B, D, B)``.
+        """
+        n_e = nodes_batch.shape[0]
+
+        dN_nat = np.stack([
+            cls._shape_function_derivatives(xi, eta)
+            for xi, eta, _ in _GAUSS_PTS
+        ])   # (6_gp, 2, 6_nodes)
+        w = np.array([wg for _, _, wg in _GAUSS_PTS])   # (6,)
+
+        J = np.einsum('gin,enj->geij', dN_nat, nodes_batch)   # (6, N_e, 2, 2)
+        det_J = np.linalg.det(J)                               # (6, N_e)
+        J_inv = np.linalg.inv(J)                               # (6, N_e, 2, 2)
+
+        dN_phys = np.einsum('geij,gjn->gein', J_inv, dN_nat)  # (6, N_e, 2, 6)
+
+        B = np.zeros((6, n_e, 3, 12))
+        for i in range(6):
+            c = 2 * i
+            B[:, :, 0, c    ] = dN_phys[:, :, 0, i]   # εxx : ∂Ni/∂x
+            B[:, :, 1, c + 1] = dN_phys[:, :, 1, i]   # εyy : ∂Ni/∂y
+            B[:, :, 2, c    ] = dN_phys[:, :, 1, i]   # γxy : ∂Ni/∂y
+            B[:, :, 2, c + 1] = dN_phys[:, :, 0, i]   # γxy : ∂Ni/∂x
+
+        K_e_all = np.einsum('g,ge,gepi,pq,geqj->eij', w, det_J, B, D, B) * t
+        return K_e_all   # (N_e, 12, 12)
+
+    @classmethod
+    def batch_mass_matrix(
+        cls,
+        nodes_batch: np.ndarray,
+        rho: float,
+        t: float,
+    ) -> np.ndarray:
+        """Matrices de masse pour N_e Tri6 en une seule passe tenseur.
+
+        Parameters
+        ----------
+        nodes_batch : np.ndarray, shape (N_e, 6, 2)
+            Coordonnées nodales.
+        rho : float
+            Masse volumique [kg/m³].
+        t : float
+            Épaisseur [m].
+
+        Returns
+        -------
+        M_e_all : np.ndarray, shape (N_e, 12, 12)
+
+        Notes
+        -----
+        La formule analytique est utilisée (comme dans la méthode scalaire) :
+
+            M_e[e] = (ρ · t · A[e]) · kron(m_bar, I_2)
+
+        où A[e] est l'aire des 3 sommets et m_bar la matrice 6×6 de
+        coefficients barycentriques (constant, précomputable).
+        """
+        # Aire via les 3 sommets (nœuds 0-2)
+        x = nodes_batch[:, :3, 0]   # (N_e, 3)
+        y = nodes_batch[:, :3, 1]
+        area = 0.5 * np.abs(
+            (x[:, 1] - x[:, 0]) * (y[:, 2] - y[:, 0])
+            - (x[:, 2] - x[:, 0]) * (y[:, 1] - y[:, 0])
+        )   # (N_e,)
+
+        C  =  1.0 / 30.0
+        CO = -1.0 / 180.0
+        A0 =  0.0
+        NA = -1.0 / 45.0
+        MD =  8.0 / 45.0
+        MA =  4.0 / 45.0
+        m_bar = np.array([
+            [ C,  CO,  CO,  A0,  NA,  A0],
+            [CO,   C,  CO,  A0,  A0,  NA],
+            [CO,  CO,   C,  NA,  A0,  A0],
+            [A0,  A0,  NA,  MD,  MA,  MA],
+            [NA,  A0,  A0,  MA,  MD,  MA],
+            [A0,  NA,  A0,  MA,  MA,  MD],
+        ], dtype=float)
+        M_pat = np.kron(m_bar, np.eye(2))   # (12, 12) — constant
+
+        scales = rho * t * area   # (N_e,)
+        return scales[:, np.newaxis, np.newaxis] * M_pat[np.newaxis]   # (N_e, 12, 12)

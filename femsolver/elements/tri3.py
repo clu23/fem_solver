@@ -359,3 +359,124 @@ class Tri3(Element):
         """
         D = self._elasticity_matrix(material, formulation)
         return D @ self.strain(nodes, u_e)
+
+    # ------------------------------------------------------------------
+    # Interface batch (vectorisation sur N_e éléments simultanément)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def batch_stiffness_matrix(
+        cls,
+        nodes_batch: np.ndarray,
+        D: np.ndarray,
+        t: float,
+    ) -> np.ndarray:
+        """Matrices de rigidité pour N_e Tri3 en une seule passe tenseur.
+
+        Parameters
+        ----------
+        nodes_batch : np.ndarray, shape (N_e, 3, 2)
+            Coordonnées nodales de tous les éléments du groupe.
+        D : np.ndarray, shape (3, 3)
+            Matrice d'élasticité (identique pour tout le groupe).
+        t : float
+            Épaisseur [m] (identique pour tout le groupe).
+
+        Returns
+        -------
+        K_e_all : np.ndarray, shape (N_e, 6, 6)
+            Matrices de rigidité élémentaires.
+
+        Notes
+        -----
+        B étant constante sur chaque Tri3 (CST), la vectorisation est directe :
+
+        1. Coefficients b_i, c_i et aires calculés vectoriellement sur N_e
+           éléments.
+        2. B_unnorm[e] : matrice B sans le facteur 1/(2A) — shape (N_e, 3, 6).
+        3. K_e[e] = B_unnorm[e]ᵀ · D · B_unnorm[e] · t / (4 · A[e]).
+
+        Cette formulation évite tout branchement sur le signe de l'aire et est
+        valide quelle que soit l'orientation des nœuds (CCW ou CW).
+        """
+        x = nodes_batch[:, :, 0]  # (N_e, 3)
+        y = nodes_batch[:, :, 1]  # (N_e, 3)
+
+        b0 = y[:, 1] - y[:, 2]   # b_1 = y2 - y3
+        b1 = y[:, 2] - y[:, 0]   # b_2 = y3 - y1
+        b2 = y[:, 0] - y[:, 1]   # b_3 = y1 - y2
+        c0 = x[:, 2] - x[:, 1]   # c_1 = x3 - x2
+        c1 = x[:, 0] - x[:, 2]   # c_2 = x1 - x3
+        c2 = x[:, 1] - x[:, 0]   # c_3 = x2 - x1
+
+        area = 0.5 * np.abs(
+            (x[:, 1] - x[:, 0]) * (y[:, 2] - y[:, 0])
+            - (x[:, 2] - x[:, 0]) * (y[:, 1] - y[:, 0])
+        )  # (N_e,)
+
+        n_e = nodes_batch.shape[0]
+        # B_unnorm = [[b0, 0, b1, 0, b2, 0],
+        #             [ 0, c0,  0, c1,  0, c2],
+        #             [c0, b0, c1, b1, c2, b2]]
+        # without the 1/(2A) factor
+        B_u = np.zeros((n_e, 3, 6))
+        B_u[:, 0, 0] = b0;  B_u[:, 0, 2] = b1;  B_u[:, 0, 4] = b2
+        B_u[:, 1, 1] = c0;  B_u[:, 1, 3] = c1;  B_u[:, 1, 5] = c2
+        B_u[:, 2, 0] = c0;  B_u[:, 2, 1] = b0
+        B_u[:, 2, 2] = c1;  B_u[:, 2, 3] = b1
+        B_u[:, 2, 4] = c2;  B_u[:, 2, 5] = b2
+
+        # K_e[e] = B_u[e]ᵀ D B_u[e] · t / (4·A[e])
+        # (le 1/(2A)² du B vrai · A de l'intégrale = 1/(4A))
+        K_e_all = np.einsum('epi,pq,eqj->eij', B_u, D, B_u)
+        K_e_all *= (t / (4.0 * area))[:, np.newaxis, np.newaxis]
+        return K_e_all  # (N_e, 6, 6)
+
+    @classmethod
+    def batch_mass_matrix(
+        cls,
+        nodes_batch: np.ndarray,
+        rho: float,
+        t: float,
+    ) -> np.ndarray:
+        """Matrices de masse pour N_e Tri3 en une seule passe tenseur.
+
+        Parameters
+        ----------
+        nodes_batch : np.ndarray, shape (N_e, 3, 2)
+            Coordonnées nodales.
+        rho : float
+            Masse volumique [kg/m³].
+        t : float
+            Épaisseur [m].
+
+        Returns
+        -------
+        M_e_all : np.ndarray, shape (N_e, 6, 6)
+
+        Notes
+        -----
+        Le patron M_pat (6×6) est constant (indépendant de la géométrie).
+        Seul le facteur ρ · t · A[e] / 12 varie d'un élément à l'autre.
+
+            M_e[e] = (ρ · t · A[e] / 12) · M_pat
+        """
+        x = nodes_batch[:, :, 0]
+        y = nodes_batch[:, :, 1]
+        area = 0.5 * np.abs(
+            (x[:, 1] - x[:, 0]) * (y[:, 2] - y[:, 0])
+            - (x[:, 2] - x[:, 0]) * (y[:, 1] - y[:, 0])
+        )  # (N_e,)
+
+        # Patron de masse consistante (6×6) — constante, indépendant de la géométrie
+        M_pat = np.array([
+            [2, 0, 1, 0, 1, 0],
+            [0, 2, 0, 1, 0, 1],
+            [1, 0, 2, 0, 1, 0],
+            [0, 1, 0, 2, 0, 1],
+            [1, 0, 1, 0, 2, 0],
+            [0, 1, 0, 1, 0, 2],
+        ], dtype=float)
+
+        scales = rho * t * area / 12.0  # (N_e,)
+        return scales[:, np.newaxis, np.newaxis] * M_pat[np.newaxis]  # (N_e, 6, 6)

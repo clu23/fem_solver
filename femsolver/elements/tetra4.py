@@ -428,3 +428,100 @@ class Tetra4(Element):
         """
         D = material.elasticity_matrix_3d()
         return D @ self.strain(nodes, u_e)
+
+    # ------------------------------------------------------------------
+    # Interface batch (vectorisation sur N_e éléments simultanément)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def batch_stiffness_matrix(
+        cls,
+        nodes_batch: np.ndarray,
+        D: np.ndarray,
+    ) -> np.ndarray:
+        """Matrices de rigidité pour N_e Tetra4 en une seule passe tenseur.
+
+        Parameters
+        ----------
+        nodes_batch : np.ndarray, shape (N_e, 4, 3)
+            Coordonnées nodales de tous les éléments du groupe.
+        D : np.ndarray, shape (6, 6)
+            Matrice d'élasticité 3D (identique pour tout le groupe).
+
+        Returns
+        -------
+        K_e_all : np.ndarray, shape (N_e, 12, 12)
+            Matrices de rigidité élémentaires.
+
+        Notes
+        -----
+        Comme pour Tri3, B est constante sur chaque Tetra4 (déformations
+        constantes). La vectorisation procède en :
+
+        1. Jacobiens batch : J[e] = DN_NAT @ nodes[e]  → (N_e, 3, 3).
+        2. Volumes : det(J) / 6.
+        3. Dérivées physiques : dN_phys[e] = J⁻¹[e] @ DN_NAT → (N_e, 3, 4).
+        4. Matrices B[e] (6×12) assemblées vectoriellement.
+        5. K_e[e] = B[e]ᵀ · D · B[e] · volume[e].
+        """
+        # J[e] = DN_NAT @ nodes[e] : (3,4)@(4,3) = (3,3) par élément
+        J_all = np.einsum('in,enj->eij', cls._DN_NAT, nodes_batch)  # (N_e, 3, 3)
+        det_all = np.linalg.det(J_all)    # (N_e,)
+        volume_all = det_all / 6.0         # (N_e,)
+
+        J_inv_all = np.linalg.inv(J_all)   # (N_e, 3, 3)
+        # dN_phys[e] = J_inv[e] @ DN_NAT : (3,3)@(3,4) → (3,4)
+        dN_phys_all = np.einsum('eij,jk->eik', J_inv_all, cls._DN_NAT)  # (N_e, 3, 4)
+
+        n_e = nodes_batch.shape[0]
+        B = np.zeros((n_e, 6, 12))
+        for i in range(4):
+            c = 3 * i
+            B[:, 0, c    ] = dN_phys_all[:, 0, i]   # εxx : ∂Ni/∂x
+            B[:, 1, c + 1] = dN_phys_all[:, 1, i]   # εyy : ∂Ni/∂y
+            B[:, 2, c + 2] = dN_phys_all[:, 2, i]   # εzz : ∂Ni/∂z
+            B[:, 3, c + 1] = dN_phys_all[:, 2, i]   # γyz : ∂Ni/∂z
+            B[:, 3, c + 2] = dN_phys_all[:, 1, i]   # γyz : ∂Ni/∂y
+            B[:, 4, c    ] = dN_phys_all[:, 2, i]   # γxz : ∂Ni/∂z
+            B[:, 4, c + 2] = dN_phys_all[:, 0, i]   # γxz : ∂Ni/∂x
+            B[:, 5, c    ] = dN_phys_all[:, 1, i]   # γxy : ∂Ni/∂y
+            B[:, 5, c + 1] = dN_phys_all[:, 0, i]   # γxy : ∂Ni/∂x
+
+        K_e_all = np.einsum('epi,pq,eqj->eij', B, D, B)
+        K_e_all *= volume_all[:, np.newaxis, np.newaxis]
+        return K_e_all  # (N_e, 12, 12)
+
+    @classmethod
+    def batch_mass_matrix(
+        cls,
+        nodes_batch: np.ndarray,
+        rho: float,
+    ) -> np.ndarray:
+        """Matrices de masse pour N_e Tetra4 en une seule passe tenseur.
+
+        Parameters
+        ----------
+        nodes_batch : np.ndarray, shape (N_e, 4, 3)
+            Coordonnées nodales.
+        rho : float
+            Masse volumique [kg/m³].
+
+        Returns
+        -------
+        M_e_all : np.ndarray, shape (N_e, 12, 12)
+
+        Notes
+        -----
+        Le patron M_pat = kron([[2,1,1,1],[1,2,1,1],[1,1,2,1],[1,1,1,2]], I_3)
+        est constant. Seul le facteur ρ · V[e] / 20 varie par élément.
+
+            M_e[e] = (ρ · V[e] / 20) · M_pat
+        """
+        J_all = np.einsum('in,enj->eij', cls._DN_NAT, nodes_batch)
+        volume_all = np.linalg.det(J_all) / 6.0  # (N_e,)
+
+        # kron([[2,1,1,1],[1,2,1,1],[1,1,2,1],[1,1,1,2]], I_3) — constant
+        M_pat = np.kron(np.ones((4, 4)) + np.eye(4), np.eye(3))  # (12, 12)
+
+        scales = rho * volume_all / 20.0  # (N_e,)
+        return scales[:, np.newaxis, np.newaxis] * M_pat[np.newaxis]  # (N_e, 12, 12)

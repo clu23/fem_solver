@@ -588,3 +588,136 @@ class Tetra10(Element):
         """
         D = material.elasticity_matrix_3d()
         return D @ self.strain(nodes, u_e, xi, eta, zeta)
+
+    # ------------------------------------------------------------------
+    # Interface batch (vectorisation sur N_e éléments simultanément)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def batch_stiffness_matrix(
+        cls,
+        nodes_batch: np.ndarray,
+        D: np.ndarray,
+    ) -> np.ndarray:
+        """Matrices de rigidité pour N_e Tetra10 en une seule passe tenseur.
+
+        Parameters
+        ----------
+        nodes_batch : np.ndarray, shape (N_e, 10, 3)
+            Coordonnées nodales de tous les éléments du groupe.
+        D : np.ndarray, shape (6, 6)
+            Matrice d'élasticité 3D (identique pour tout le groupe).
+
+        Returns
+        -------
+        K_e_all : np.ndarray, shape (N_e, 30, 30)
+            Matrices de rigidité élémentaires.
+
+        Notes
+        -----
+        Analogue 3D du Tri6 batch, avec 4 points de Gauss à la place de 6 :
+
+        1. ``dN_nat`` (4_gp, 3, 10) — dérivées naturelles (constantes).
+        2. ``J = einsum('gin,enj->geij', dN_nat, nodes)`` → (4, N_e, 3, 3).
+        3. ``dN_phys = einsum('geij,gjn->gein', J_inv, dN_nat)``
+           → (4, N_e, 3, 10).
+        4. Matrices B (4_gp, N_e, 6, 30).
+        5. ``K_e = einsum('g,ge,gepi,pq,geqj->eij', w, det_J, B, D, B)``.
+        """
+        n_e = nodes_batch.shape[0]
+
+        dN_nat = np.stack([
+            cls._shape_function_derivatives(xi, eta, zeta)
+            for xi, eta, zeta, _ in _GAUSS_K4
+        ])   # (4_gp, 3, 10_nodes)
+        w = np.array([wg for _, _, _, wg in _GAUSS_K4])   # (4,)
+
+        J = np.einsum('gin,enj->geij', dN_nat, nodes_batch)   # (4, N_e, 3, 3)
+        det_J = np.linalg.det(J)                               # (4, N_e)
+        J_inv = np.linalg.inv(J)                               # (4, N_e, 3, 3)
+
+        dN_phys = np.einsum('geij,gjn->gein', J_inv, dN_nat)  # (4, N_e, 3, 10)
+
+        B = np.zeros((4, n_e, 6, 30))
+        for k in range(10):
+            c = 3 * k
+            B[:, :, 0, c    ] = dN_phys[:, :, 0, k]   # εxx : ∂Nk/∂x
+            B[:, :, 1, c + 1] = dN_phys[:, :, 1, k]   # εyy : ∂Nk/∂y
+            B[:, :, 2, c + 2] = dN_phys[:, :, 2, k]   # εzz : ∂Nk/∂z
+            B[:, :, 3, c + 1] = dN_phys[:, :, 2, k]   # γyz : ∂Nk/∂z
+            B[:, :, 3, c + 2] = dN_phys[:, :, 1, k]   # γyz : ∂Nk/∂y
+            B[:, :, 4, c    ] = dN_phys[:, :, 2, k]   # γxz : ∂Nk/∂z
+            B[:, :, 4, c + 2] = dN_phys[:, :, 0, k]   # γxz : ∂Nk/∂x
+            B[:, :, 5, c    ] = dN_phys[:, :, 1, k]   # γxy : ∂Nk/∂y
+            B[:, :, 5, c + 1] = dN_phys[:, :, 0, k]   # γxy : ∂Nk/∂x
+
+        K_e_all = np.einsum('g,ge,gepi,pq,geqj->eij', w, det_J, B, D, B)
+        return K_e_all   # (N_e, 30, 30)
+
+    @classmethod
+    def batch_mass_matrix(
+        cls,
+        nodes_batch: np.ndarray,
+        rho: float,
+    ) -> np.ndarray:
+        """Matrices de masse pour N_e Tetra10 en une seule passe tenseur.
+
+        Parameters
+        ----------
+        nodes_batch : np.ndarray, shape (N_e, 10, 3)
+            Coordonnées nodales.
+        rho : float
+            Masse volumique [kg/m³].
+
+        Returns
+        -------
+        M_e_all : np.ndarray, shape (N_e, 30, 30)
+
+        Notes
+        -----
+        La formule analytique est utilisée (comme dans la méthode scalaire) :
+
+            M_e[e] = (ρ · V[e]) · kron(m_bar, I_3)
+
+        V[e] est calculé via les 4 coins. m_bar (10×10) est constant.
+        """
+        # Volume via les 4 coins (nœuds 0-3)
+        corners = nodes_batch[:, :4, :]                           # (N_e, 4, 3)
+        edge_vecs = corners[:, 1:, :] - corners[:, 0:1, :]       # (N_e, 3, 3)
+        volume = np.abs(np.linalg.det(edge_vecs)) / 6.0          # (N_e,)
+
+        # Matrice analytique m_bar (10×10) — identique à la méthode scalaire
+        CC  =  1.0 / 70.0
+        CO  =  1.0 / 420.0
+        CA  = -1.0 / 105.0
+        CN  = -1.0 / 70.0
+        MS  =  8.0 / 105.0
+        MA  =  4.0 / 105.0
+        MO  =  2.0 / 105.0
+
+        m_bar = np.zeros((10, 10))
+        for i in range(4):
+            for j in range(4):
+                m_bar[i, j] = CC if i == j else CO
+
+        adj = {0: {4, 6, 7}, 1: {4, 5, 8}, 2: {5, 6, 9}, 3: {7, 8, 9}}
+        for ci in range(4):
+            for mi in range(4, 10):
+                val = CA if mi in adj[ci] else CN
+                m_bar[ci, mi] = val
+                m_bar[mi, ci] = val
+
+        opposite = {(4, 9), (5, 7), (6, 8), (9, 4), (7, 5), (8, 6)}
+        for mi in range(4, 10):
+            for mj in range(4, 10):
+                if mi == mj:
+                    m_bar[mi, mj] = MS
+                elif (mi, mj) in opposite:
+                    m_bar[mi, mj] = MO
+                else:
+                    m_bar[mi, mj] = MA
+
+        M_pat = np.kron(m_bar, np.eye(3))   # (30, 30) — constant
+
+        scales = rho * volume   # (N_e,)
+        return scales[:, np.newaxis, np.newaxis] * M_pat[np.newaxis]   # (N_e, 30, 30)

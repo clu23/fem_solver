@@ -405,18 +405,23 @@ class Assembler:
         elem_class = type(elem_group[0].get_element())
         props = elem_group[0].properties
 
-        t = props["thickness"]
-        formulation = props.get("formulation", "plane_stress")
-        if formulation == "plane_stress":
-            D = material.elasticity_matrix_plane_stress()
-        else:
-            D = material.elasticity_matrix_plane_strain()
-
         nodes_batch = np.stack([
             mesh.node_coords(ed.node_ids) for ed in elem_group
         ])   # (N_e, n_nodes, n_dim)
 
-        K_e_all = elem_class.batch_stiffness_matrix(nodes_batch, D, t)   # (N_e, n_dof_e, n_dof_e)
+        if props and "thickness" in props:
+            # Élément 2D (Tri3, Quad4, Tri6…)
+            t = props["thickness"]
+            formulation = props.get("formulation", "plane_stress")
+            if formulation == "plane_stress":
+                D = material.elasticity_matrix_plane_stress()
+            else:
+                D = material.elasticity_matrix_plane_strain()
+            K_e_all = elem_class.batch_stiffness_matrix(nodes_batch, D, t)
+        else:
+            # Élément 3D (Tetra4, Hexa8, Tetra10…)
+            D = material.elasticity_matrix_3d()
+            K_e_all = elem_class.batch_stiffness_matrix(nodes_batch, D)
 
         dofs_all = np.array([
             mesh.global_dofs(ed.node_ids) for ed in elem_group
@@ -499,13 +504,18 @@ class Assembler:
         mesh = self.mesh
         elem_class = type(elem_group[0].get_element())
         props = elem_group[0].properties
-        t = props["thickness"]
 
         nodes_batch = np.stack([
             mesh.node_coords(ed.node_ids) for ed in elem_group
         ])
 
-        M_e_all = elem_class.batch_mass_matrix(nodes_batch, material.rho, t)
+        if props and "thickness" in props:
+            # Élément 2D (Tri3, Quad4, Tri6…)
+            t = props["thickness"]
+            M_e_all = elem_class.batch_mass_matrix(nodes_batch, material.rho, t)
+        else:
+            # Élément 3D (Tetra4, Hexa8, Tetra10…)
+            M_e_all = elem_class.batch_mass_matrix(nodes_batch, material.rho)
 
         dofs_all = np.array([
             mesh.global_dofs(ed.node_ids) for ed in elem_group

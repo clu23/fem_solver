@@ -721,3 +721,136 @@ class Hexa8(Element):
         """
         D = material.elasticity_matrix_3d()
         return D @ self.strain(nodes, u_e, xi, eta, zeta)
+
+    # ------------------------------------------------------------------
+    # Interface batch (vectorisation sur N_e éléments simultanément)
+    # ------------------------------------------------------------------
+
+    @classmethod
+    def batch_stiffness_matrix(
+        cls,
+        nodes_batch: np.ndarray,
+        D: np.ndarray,
+    ) -> np.ndarray:
+        """Matrices de rigidité pour N_e Hexa8 en une seule passe tenseur.
+
+        Extension 3D du Quad4 batch : mêmes einsum, une dimension de plus.
+
+        Parameters
+        ----------
+        nodes_batch : np.ndarray, shape (N_e, 8, 3)
+            Coordonnées nodales de tous les éléments du groupe.
+        D : np.ndarray, shape (6, 6)
+            Matrice d'élasticité 3D (identique pour tout le groupe).
+
+        Returns
+        -------
+        K_e_all : np.ndarray, shape (N_e, 24, 24)
+            Matrices de rigidité élémentaires.
+
+        Notes
+        -----
+        Algorithme (analogue 3D du Quad4 batch) :
+
+        1. ``dN_nat`` (8_gp, 3, 8) — dérivées naturelles (constantes).
+        2. Jacobiens batch : ``J = einsum('gin,enj->geij', dN_nat, nodes)``
+           → (8_gp, N_e, 3, 3).
+        3. ``det_J``, ``J_inv`` via broadcast natif.
+        4. ``dN_phys = einsum('geij,gjn->gein', J_inv, dN_nat)``
+           → (8_gp, N_e, 3, 8).
+        5. Matrices B (8_gp, N_e, 6, 24).
+        6. ``K_e = einsum('g,ge,gepi,pq,geqj->eij', w, det_J, B, D, B)``
+           → (N_e, 24, 24).
+        """
+        n_e = nodes_batch.shape[0]
+        gp = _GP
+        xi_eta_zeta_w = [
+            (-gp, -gp, -gp, 1.0), ( gp, -gp, -gp, 1.0),
+            ( gp,  gp, -gp, 1.0), (-gp,  gp, -gp, 1.0),
+            (-gp, -gp,  gp, 1.0), ( gp, -gp,  gp, 1.0),
+            ( gp,  gp,  gp, 1.0), (-gp,  gp,  gp, 1.0),
+        ]
+
+        dN_nat = np.stack([
+            cls._shape_function_derivatives(xi, eta, zeta)
+            for xi, eta, zeta, _ in xi_eta_zeta_w
+        ])   # (8_gp, 3, 8_nodes)
+        w = np.array([wg for _, _, _, wg in xi_eta_zeta_w])   # (8,) — tous = 1
+
+        J = np.einsum('gin,enj->geij', dN_nat, nodes_batch)   # (8, N_e, 3, 3)
+        det_J = np.linalg.det(J)                               # (8, N_e)
+        J_inv = np.linalg.inv(J)                               # (8, N_e, 3, 3)
+
+        dN_phys = np.einsum('geij,gjn->gein', J_inv, dN_nat)  # (8, N_e, 3, 8)
+
+        B = np.zeros((8, n_e, 6, 24))
+        for i in range(8):
+            c = 3 * i
+            B[:, :, 0, c    ] = dN_phys[:, :, 0, i]   # εxx : ∂Ni/∂x
+            B[:, :, 1, c + 1] = dN_phys[:, :, 1, i]   # εyy : ∂Ni/∂y
+            B[:, :, 2, c + 2] = dN_phys[:, :, 2, i]   # εzz : ∂Ni/∂z
+            B[:, :, 3, c + 1] = dN_phys[:, :, 2, i]   # γyz : ∂Ni/∂z
+            B[:, :, 3, c + 2] = dN_phys[:, :, 1, i]   # γyz : ∂Ni/∂y
+            B[:, :, 4, c    ] = dN_phys[:, :, 2, i]   # γxz : ∂Ni/∂z
+            B[:, :, 4, c + 2] = dN_phys[:, :, 0, i]   # γxz : ∂Ni/∂x
+            B[:, :, 5, c    ] = dN_phys[:, :, 1, i]   # γxy : ∂Ni/∂y
+            B[:, :, 5, c + 1] = dN_phys[:, :, 0, i]   # γxy : ∂Ni/∂x
+
+        K_e_all = np.einsum('g,ge,gepi,pq,geqj->eij', w, det_J, B, D, B)
+        return K_e_all   # (N_e, 24, 24)
+
+    @classmethod
+    def batch_mass_matrix(
+        cls,
+        nodes_batch: np.ndarray,
+        rho: float,
+    ) -> np.ndarray:
+        """Matrices de masse pour N_e Hexa8 en une seule passe tenseur.
+
+        Parameters
+        ----------
+        nodes_batch : np.ndarray, shape (N_e, 8, 3)
+            Coordonnées nodales.
+        rho : float
+            Masse volumique [kg/m³].
+
+        Returns
+        -------
+        M_e_all : np.ndarray, shape (N_e, 24, 24)
+
+        Notes
+        -----
+        NtN[g] = N_mat[g]ᵀ @ N_mat[g] est une constante précomputable :
+
+            M_e = ρ · einsum('g,ge,gij->eij', w, det_J, NtN)
+        """
+        n_e = nodes_batch.shape[0]
+        gp = _GP
+        xi_eta_zeta_w = [
+            (-gp, -gp, -gp, 1.0), ( gp, -gp, -gp, 1.0),
+            ( gp,  gp, -gp, 1.0), (-gp,  gp, -gp, 1.0),
+            (-gp, -gp,  gp, 1.0), ( gp, -gp,  gp, 1.0),
+            ( gp,  gp,  gp, 1.0), (-gp,  gp,  gp, 1.0),
+        ]
+        w = np.array([wg for _, _, _, wg in xi_eta_zeta_w])
+
+        # NtN[g] = N_mat[g]ᵀ N_mat[g] : (8_gp, 24, 24) — constant
+        NtN = np.zeros((8, 24, 24))
+        for g, (xi, eta, zeta, _) in enumerate(xi_eta_zeta_w):
+            Nv = cls._shape_functions(xi, eta, zeta)   # (8,)
+            N_mat = np.zeros((3, 24))
+            for i in range(8):
+                N_mat[0, 3 * i    ] = Nv[i]
+                N_mat[1, 3 * i + 1] = Nv[i]
+                N_mat[2, 3 * i + 2] = Nv[i]
+            NtN[g] = N_mat.T @ N_mat
+
+        dN_nat = np.stack([
+            cls._shape_function_derivatives(xi, eta, zeta)
+            for xi, eta, zeta, _ in xi_eta_zeta_w
+        ])
+        J = np.einsum('gin,enj->geij', dN_nat, nodes_batch)
+        det_J = np.linalg.det(J)   # (8, N_e)
+
+        M_e_all = np.einsum('g,ge,gij->eij', w, det_J, NtN) * rho
+        return M_e_all   # (N_e, 24, 24)
