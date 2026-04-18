@@ -285,9 +285,23 @@ def _group_elements_for_batch(
     dict mapping ``(elem_class, material, frozenset_props)`` →
     ``list[ElementData]``.
     """
+    def _make_hashable(v: object) -> object:
+        """Convertit les types non-hashables (ndarray, list) en tuple pour la clé."""
+        if isinstance(v, np.ndarray):
+            return v.tobytes()
+        if isinstance(v, list):
+            return tuple(v)
+        return v
+
     groups: dict[tuple, list] = defaultdict(list)
     for elem_data in mesh.elements:
-        props_key = frozenset(elem_data.properties.items()) if elem_data.properties else frozenset()
+        if elem_data.properties:
+            props_key = frozenset(
+                (k, _make_hashable(val))
+                for k, val in elem_data.properties.items()
+            )
+        else:
+            props_key = frozenset()
         key = (type(elem_data.get_element()), elem_data.material, props_key)
         groups[key].append(elem_data)
     return dict(groups)
