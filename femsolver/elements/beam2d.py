@@ -404,6 +404,72 @@ class Beam2D(Element):
     # Post-traitement : efforts internes
     # ------------------------------------------------------------------
 
+    def geometric_stiffness_matrix(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        u_e: np.ndarray,
+    ) -> np.ndarray:
+        """Matrice de rigidité géométrique 6×6 pour la poutre Euler–Bernoulli.
+
+        L'effort axial N de l'état pré-flambement modifie la rigidité
+        de flexion via l'intégrale de l'énergie de courbure due à N :
+
+            δ²W = ∫₀ᴸ N · (dv/dx)(dδv/dx) dx
+
+        Avec les polynômes de Hermite, l'intégration donne la sous-matrice
+        de flexion 4×4 (DDL {uy₁, θ₁, uy₂, θ₂}) :
+
+            K_g_flex = (N / 30L) · [[ 36,  3L, −36,  3L],
+                                      [  3L, 4L²,−3L, −L²],
+                                      [−36, −3L,  36, −3L],
+                                      [  3L, −L², −3L, 4L²]]
+
+        Les DDL axiaux {ux₁, ux₂} (indices 0 et 3) ont une contribution
+        nulle à K_g dans la formulation linéaire.
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (E·A utilisé pour calculer N).
+        nodes : np.ndarray, shape (2, 2)
+            Coordonnées [[x₁, y₁], [x₂, y₂]].
+        properties : dict
+            ``"area"`` et ``"inertia"`` (ou ``"section"``).
+        u_e : np.ndarray, shape (6,)
+            Déplacements [ux₁, uy₁, θ₁, ux₂, uy₂, θ₂] (repère global).
+
+        Returns
+        -------
+        K_g_e : np.ndarray, shape (6, 6)
+            Rigidité géométrique en repère global.
+            Négative dans le bloc de flexion si N < 0 (compression).
+
+        Notes
+        -----
+        Référence : Cook et al., « Concepts and Applications of FEA »,
+        4th ed., §15.1 ; Bathe, « FE Procedures », §6.3.4.
+        """
+        L, c, s = self._geometry(nodes)
+        T = self._rotation_matrix(c, s)
+        u_local = T @ u_e
+        ea, _ = self._beam_props(material, properties)
+        N = ea / L * (u_local[3] - u_local[0])   # N < 0 = compression
+
+        L2 = L * L
+        a = N / (30.0 * L)
+
+        K_g_local = a * np.array([
+            [ 0.0,   0.0,    0.0,    0.0,   0.0,    0.0  ],
+            [ 0.0,  36.0,   3.0*L,   0.0, -36.0,   3.0*L ],
+            [ 0.0,   3.0*L, 4.0*L2,  0.0,  -3.0*L, -L2   ],
+            [ 0.0,   0.0,    0.0,    0.0,   0.0,    0.0  ],
+            [ 0.0, -36.0,  -3.0*L,   0.0,  36.0,  -3.0*L ],
+            [ 0.0,   3.0*L, -L2,     0.0,  -3.0*L,  4.0*L2],
+        ])
+        return T.T @ K_g_local @ T
+
     def distributed_load_vector(
         self,
         material: ElasticMaterial,

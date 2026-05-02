@@ -304,6 +304,63 @@ class Bar2D(Element):
         """
         return self.axial_force(material, nodes, area, u_e) / area
 
+    def geometric_stiffness_matrix(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        u_e: np.ndarray,
+    ) -> np.ndarray:
+        """Matrice de rigidité géométrique 4×4 pour la barre.
+
+        L'effort axial N de l'état pré-flambement crée une rigidité
+        apparente transversale N/L. En repère local :
+
+            K_g_local = (N/L) · [[0,  0,  0,  0],
+                                   [0,  1,  0, −1],
+                                   [0,  0,  0,  0],
+                                   [0, −1,  0,  1]]
+
+        Seuls les DDL transversaux (indices 1 et 3 en local) participent
+        car la barre 2D est rectiligne — la courbure axiale est négligée.
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (E utilisé pour calculer N).
+        nodes : np.ndarray, shape (2, 2)
+            Coordonnées [[x1, y1], [x2, y2]].
+        properties : dict
+            ``"area"`` : section transversale [m²].
+        u_e : np.ndarray, shape (4,)
+            Déplacements [ux1, uy1, ux2, uy2] (repère global).
+
+        Returns
+        -------
+        K_g_e : np.ndarray, shape (4, 4)
+            Rigidité géométrique en repère global.
+            Négative si N < 0 (compression).
+
+        Notes
+        -----
+        Dérivation : δ²W = ∫₀ᴸ N·(∂δv/∂x)² dx = (N/L)·(δv₂−δv₁)²
+        avec des fonctions de forme linéaires (dv/dx = cste).
+
+        Référence : Bathe, « FE Procedures », §6.3 ; Cook et al., chap. 15.
+        """
+        area = properties["area"]
+        L, c, s = self._geometry(nodes)
+        N = self.axial_force(material, nodes, area, u_e)   # N < 0 = compression
+
+        K_g_local = (N / L) * np.array([
+            [0.0,  0.0, 0.0,  0.0],
+            [0.0,  1.0, 0.0, -1.0],
+            [0.0,  0.0, 0.0,  0.0],
+            [0.0, -1.0, 0.0,  1.0],
+        ])
+        T = self._rotation_matrix(c, s)
+        return T.T @ K_g_local @ T
+
     def distributed_load_vector(
         self,
         material: ElasticMaterial,

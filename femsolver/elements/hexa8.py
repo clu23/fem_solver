@@ -505,6 +505,84 @@ class Hexa8(Element):
 
         return M_e * material.rho
 
+    def geometric_stiffness_matrix(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        u_e: np.ndarray,
+    ) -> np.ndarray:
+        """Matrice de rigidité géométrique 24×24 par intégration 2×2×2 Gauss.
+
+        Extension 3D de la formulation Quad4 :
+
+            K_g = ∫∫∫ Gᵀ σ̃₃D G dV
+
+        où :
+        - G = dN_phys (3×8) : dérivées physiques G[α, I] = ∂N_I/∂x_α
+        - σ̃₃D = [[σxx, τxy, τxz], [τxy, σyy, τyz], [τxz, τyz, σzz]]
+
+        Structure de K_g :
+            K_g[3I+α, 3J+β] = δ_{αβ} × ∫∫∫ (∇N_I)ᵀ σ̃ (∇N_J) dV
+
+        Les 3 composantes de déplacement (ux, uy, uz) contribuent identiquement
+        et sans termes croisés entre directions différentes.
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (E, nu utilisés pour construire D 6×6 → σ = D B u_e).
+        nodes : np.ndarray, shape (8, 3)
+            Coordonnées des 8 nœuds.
+        properties : dict
+            Non utilisé pour Hexa8 (peut être ``{}``).
+        u_e : np.ndarray, shape (24,)
+            Déplacements [u0,v0,w0, u1,v1,w1, …, u7,v7,w7] (repère global).
+
+        Returns
+        -------
+        K_g_e : np.ndarray, shape (24, 24)
+            Matrice de rigidité géométrique symétrique.
+
+        Notes
+        -----
+        Pour flambage sous compression hydrostatique σxx = σyy = σzz < 0,
+        K_g est semi-définie négative → réduit la rigidité apparente dans
+        les trois directions spatiales.
+
+        Référence : Bathe, « FE Procedures », §6.3.3 ; Cook et al., §15.2.
+        """
+        if nodes.shape != (8, 3):
+            raise ValueError(
+                f"Hexa8 attend nodes.shape == (8, 3), reçu {nodes.shape}"
+            )
+        D = material.elasticity_matrix_3d()
+        K_g = np.zeros((24, 24))
+        idx = np.arange(8)
+
+        for xi, eta, zeta, w in _GAUSS_POINTS_2X2X2:
+            B, det_J = self._strain_displacement_matrix(xi, eta, zeta, nodes)
+            # σ en notation de Voigt : [σxx, σyy, σzz, τyz, τxz, τxy]
+            sigma_v = D @ (B @ u_e)
+            sigma_tensor = np.array([
+                [sigma_v[0], sigma_v[5], sigma_v[4]],
+                [sigma_v[5], sigma_v[1], sigma_v[3]],
+                [sigma_v[4], sigma_v[3], sigma_v[2]],
+            ])
+
+            dN = self._shape_function_derivatives(xi, eta, zeta)
+            J, _ = self._jacobian(dN, nodes)
+            G = np.linalg.solve(J, dN)   # dN_phys : (3, 8)
+
+            k_nodal = G.T @ sigma_tensor @ G   # (8, 8)
+            contrib = w * det_J * k_nodal
+
+            # K_g[3I+α, 3J+α] += k_IJ pour α ∈ {0, 1, 2}
+            for alpha in range(3):
+                K_g[np.ix_(3 * idx + alpha, 3 * idx + alpha)] += contrib
+
+        return K_g
+
     def stiffness_matrix_sri(
         self,
         material: ElasticMaterial,

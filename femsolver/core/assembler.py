@@ -559,6 +559,73 @@ class Assembler:
             cols_list.append(c)
             vals_list.append(v)
 
+    def assemble_geometric_stiffness(self, u: np.ndarray) -> csr_matrix:
+        """Assemble la matrice de rigidité géométrique globale K_g (format CSR).
+
+        K_g traduit l'effet des efforts internes (calculés à partir du champ
+        de déplacements u de l'état pré-flambement) sur la rigidité apparente.
+
+        Seuls les éléments implémentant ``geometric_stiffness_matrix()``
+        contribuent à K_g. Les éléments qui ne l'implémentent pas sont ignorés
+        silencieusement.
+
+        Parameters
+        ----------
+        u : np.ndarray, shape (n_dof,)
+            Vecteur de déplacements de l'état pré-flambement (solution statique
+            sous la charge de référence). Détermine les efforts internes.
+
+        Returns
+        -------
+        K_g : csr_matrix, shape (n_dof, n_dof)
+            Matrice de rigidité géométrique globale creuse, symétrique.
+            Négative semi-définie pour un chargement purement compressif.
+
+        Notes
+        -----
+        Workflow flambage :
+
+        1. Assembler K et F (charge de référence).
+        2. Appliquer les CL : ``ds = apply_dirichlet(K, F, mesh, bc)``.
+        3. Résoudre l'état pré-flambement : ``u = StaticSolver().solve(*ds)``.
+        4. Assembler K_g : ``K_g = assembler.assemble_geometric_stiffness(u)``.
+        5. Réduire aux DDL libres : ``K_g_free = ds.reduce(K_g)``.
+        6. Résoudre flambage : ``λ, φ = BucklingSolver().solve(ds.K_free, K_g_free)``.
+
+        Examples
+        --------
+        >>> # Après résolution statique u = solve(K_bc, F_bc)
+        >>> K_g = assembler.assemble_geometric_stiffness(u)
+        >>> K_g.shape  # (n_dof, n_dof)
+        """
+        mesh = self.mesh
+        n_dof = mesh.n_dof
+        rows_list: list[np.ndarray] = []
+        cols_list: list[np.ndarray] = []
+        vals_list: list[np.ndarray] = []
+
+        for elem_data in mesh.elements:
+            elem = elem_data.get_element()
+            try:
+                node_coords = mesh.node_coords(elem_data.node_ids)
+                dofs = np.array(mesh.global_dofs(elem_data.node_ids))
+                u_e = u[dofs]
+                K_g_e = elem.geometric_stiffness_matrix(
+                    elem_data.material, node_coords, elem_data.properties, u_e
+                )
+            except NotImplementedError:
+                continue
+
+            r, c, v = _scatter_coo_batch(K_g_e[np.newaxis], dofs[np.newaxis])
+            rows_list.append(r)
+            cols_list.append(c)
+            vals_list.append(v)
+
+        rows = np.concatenate(rows_list) if rows_list else np.array([], dtype=int)
+        cols = np.concatenate(cols_list) if cols_list else np.array([], dtype=int)
+        vals = np.concatenate(vals_list) if vals_list else np.array([], dtype=float)
+        return coo_matrix((vals, (rows, cols)), shape=(n_dof, n_dof)).tocsr()
+
     def assemble_forces(self, bc: BoundaryConditions) -> np.ndarray:
         """Assemble le vecteur de forces nodales F à partir des conditions aux limites.
 

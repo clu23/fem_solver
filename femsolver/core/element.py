@@ -162,6 +162,57 @@ class Element(ABC):
             "Implémentez body_force_vector() dans la sous-classe."
         )
 
+    def geometric_stiffness_matrix(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        u_e: np.ndarray,
+    ) -> np.ndarray:
+        """Matrice de rigidité géométrique élémentaire K_g.
+
+        K_g traduit l'effet des efforts internes (N, M, V) sur la rigidité
+        apparente de la structure. Elle intervient dans le problème de
+        flambage linéaire :
+
+            (K + λ K_g) φ = 0
+
+        où λ est le multiplicateur de charge critique et φ le mode de flambage.
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Propriétés du matériau.
+        nodes : np.ndarray, shape (n_elem_nodes, n_dim)
+            Coordonnées des nœuds en repère global.
+        properties : dict
+            Propriétés géométriques (même interface que stiffness_matrix).
+        u_e : np.ndarray, shape (n_dof_elem,)
+            Déplacements nodaux de l'état pré-flambement (en repère global).
+            Détermine les efforts internes (N, M ou σ) utilisés pour K_g.
+
+        Returns
+        -------
+        K_g_e : np.ndarray, shape (n_dof_elem, n_dof_elem)
+            Matrice de rigidité géométrique élémentaire symétrique.
+            Négative pour un chargement de compression pur.
+
+        Raises
+        ------
+        NotImplementedError
+            Si l'élément n'implémente pas cette méthode.
+
+        Notes
+        -----
+        Pour la compression (N < 0) : K_g < 0 → réduit la rigidité apparente.
+        Pour la traction (N > 0) : K_g > 0 → augmente la rigidité apparente.
+        La singularité de (K + λ K_g) détermine la charge critique.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} n'implémente pas geometric_stiffness_matrix(). "
+            "Implémenter dans la sous-classe pour activer l'analyse de flambage."
+        )
+
     def distributed_load_vector(
         self,
         material: ElasticMaterial,

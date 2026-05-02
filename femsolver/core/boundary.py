@@ -163,6 +163,32 @@ class DirichletSystem:
         self._require_elimination()
         return self._F_bc[self._free_dofs].copy()
 
+    def reduce(self, A: csr_matrix) -> csr_matrix:
+        """Extrait la sous-matrice d'une matrice quelconque pour les DDL libres.
+
+        .. math:: A_{\\text{free}} = A[f, f]
+
+        Utile pour réduire K_g, M ou toute matrice globale au sous-système
+        des DDL libres avant résolution (modale, flambage…).
+
+        Parameters
+        ----------
+        A : csr_matrix, shape (n_dof, n_dof)
+            Matrice globale (rigidité, masse, géométrique, etc.).
+
+        Returns
+        -------
+        csr_matrix, shape (n_free, n_free)
+
+        Raises
+        ------
+        NotImplementedError
+            Si ``method != "elimination"``.
+        """
+        self._require_elimination()
+        f = self._free_dofs
+        return A[f, :][:, f].tocsr()
+
     def reduce_mass(self, M: csr_matrix) -> csr_matrix:
         """Extrait la sous-matrice de masse pour les DDL libres.
 
@@ -191,9 +217,7 @@ class DirichletSystem:
         NotImplementedError
             Si ``method != "elimination"``.
         """
-        self._require_elimination()
-        f = self._free_dofs
-        return M[f, :][:, f].tocsr()
+        return self.reduce(M)
 
     # ------------------------------------------------------------------
     # Reconstruction de la solution complète

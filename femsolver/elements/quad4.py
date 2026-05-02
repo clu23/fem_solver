@@ -461,6 +461,88 @@ class Quad4(Element):
         M_e_all = np.einsum('g,ge,gij->eij', w, det_J, NtN) * (rho * t)
         return M_e_all   # (N_e, 8, 8)
 
+    def geometric_stiffness_matrix(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        u_e: np.ndarray,
+    ) -> np.ndarray:
+        """Matrice de rigidité géométrique 8×8 par intégration 2×2 Gauss.
+
+        Pour un élément plan en état pré-contraint σ₀ = [σxx, σyy, τxy],
+        la 2ᵉ variation de l'énergie potentielle donne :
+
+            δ²W = t ∫∫ σᵢⱼ (∂δuₖ/∂xᵢ)(∂δuₖ/∂xⱼ) dA
+
+        Cela se factorise comme :
+
+            K_g = t ∫∫ Gᵀ σ̃ G dA
+
+        où :
+        - G = dN_phys (2×4) : dérivées physiques des fonctions de forme
+          G[α, I] = ∂N_I/∂x_α
+        - σ̃ = [[σxx, τxy], [τxy, σyy]] : tenseur de contraintes 2D
+
+        Structure de K_g :
+            K_g[2I+α, 2J+β] = δ_{αβ} × ∫∫ (∇N_I)ᵀ σ̃ (∇N_J) t dA
+
+        Les composantes ux et uy sont couplées identiquement (pas de termes
+        croisés ux–uy dans K_g pour les éléments 2D isoparamétriques).
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (E, nu utilisés pour calculer σ = D B u_e).
+        nodes : np.ndarray, shape (4, 2)
+            Coordonnées nodales.
+        properties : dict
+            ``"thickness"`` et optionnellement ``"formulation"``.
+        u_e : np.ndarray, shape (8,)
+            Déplacements [u1, v1, u2, v2, u3, v3, u4, v4] (repère global).
+
+        Returns
+        -------
+        K_g_e : np.ndarray, shape (8, 8)
+            Matrice de rigidité géométrique symétrique.
+
+        Notes
+        -----
+        La contrainte σ₀ est calculée à partir de u_e (état pré-flambement).
+        Pour flambage sous compression uniaxiale σxx < 0, K_g < 0 dans les
+        DDL transversaux → réduction de la rigidité apparente.
+
+        Référence : Bathe, « FE Procedures », §6.3 ; Zienkiewicz & Taylor,
+        vol. 2, §9.1.
+        """
+        t = properties["thickness"]
+        formulation = properties.get("formulation", "plane_stress")
+        D = self._elasticity_matrix(material, formulation)
+
+        K_g = np.zeros((8, 8))
+        idx = np.arange(4)
+
+        for xi, eta, w in _GAUSS_POINTS_2X2:
+            B, det_J = self._strain_displacement_matrix(xi, eta, nodes)
+            sigma = D @ (B @ u_e)   # [σxx, σyy, τxy]
+            sigma_tensor = np.array([
+                [sigma[0], sigma[2]],
+                [sigma[2], sigma[1]],
+            ])
+
+            dN = self._shape_function_derivatives(xi, eta)
+            J = self._jacobian(dN, nodes)
+            G = np.linalg.solve(J, dN)   # dN_phys : (2, 4)
+
+            k_nodal = G.T @ sigma_tensor @ G   # (4, 4)
+            contrib = w * det_J * k_nodal * t
+
+            # K_g[2I+α, 2J+α] += k_IJ pour α ∈ {0, 1} (ux et uy identiques)
+            K_g[np.ix_(2 * idx,     2 * idx    )] += contrib
+            K_g[np.ix_(2 * idx + 1, 2 * idx + 1)] += contrib
+
+        return K_g
+
     def stiffness_matrix_sri(
         self,
         material: ElasticMaterial,
