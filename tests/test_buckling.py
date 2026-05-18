@@ -19,8 +19,10 @@ from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.core.solver import BucklingSolver, StaticSolver
 from femsolver.elements.bar2d import Bar2D
 from femsolver.elements.beam2d import Beam2D
+from femsolver.elements.beam3d import Beam3D
 from femsolver.elements.hexa8 import Hexa8
 from femsolver.elements.quad4 import Quad4
+from femsolver.core.sections import RectangularSection
 
 
 # ---------------------------------------------------------------------------
@@ -601,3 +603,363 @@ class TestBucklingQuad4StripColumn:
                     K_g[2*i, 2*j], K_g[2*i+1, 2*j+1], atol=1e-20,
                     err_msg=f"K_g[2*{i}, 2*{j}] ≠ K_g[2*{i}+1, 2*{j}+1]"
                 )
+
+
+# ---------------------------------------------------------------------------
+# Tests de propriétés de K_g — Beam3D
+# ---------------------------------------------------------------------------
+
+class TestBeam3DGeometricStiffness:
+    """Propriétés mathématiques de K_g pour la poutre Timoshenko 3D.
+
+    DDL locaux : [ux₁,uy₁,uz₁,θx₁,θy₁,θz₁, ux₂,uy₂,uz₂,θx₂,θy₂,θz₂]
+    Indices    : [  0,  1,  2,  3,  4,  5,    6,  7,  8,  9, 10, 11]
+    """
+
+    @pytest.fixture()
+    def sec(self):
+        """Section carrée 10 × 10 mm²."""
+        return RectangularSection(width=0.01, height=0.01)
+
+    @pytest.fixture()
+    def mat(self):
+        return ElasticMaterial(E=210e9, nu=0.3, rho=7800)
+
+    @pytest.fixture()
+    def nodes_horiz(self):
+        """Poutre horizontale de longueur 1 m le long de x."""
+        return np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+
+    def _compress_u(self, delta: float = 1e-6) -> np.ndarray:
+        """Champ de déplacement donnant une compression axiale δ en x."""
+        u = np.zeros(12)
+        u[6] = -delta   # ux₂ = −δ → compression axiale
+        return u
+
+    def test_Kg_zero_when_no_displacement(self, mat, sec, nodes_horiz):
+        """K_g = 0 si u_e = 0 (aucune précontrainte)."""
+        K_g = Beam3D().geometric_stiffness_matrix(
+            mat, nodes_horiz, {"section": sec}, np.zeros(12)
+        )
+        np.testing.assert_allclose(K_g, 0.0, atol=1e-20)
+
+    def test_Kg_shape(self, mat, sec, nodes_horiz):
+        """K_g doit être de taille (12, 12)."""
+        K_g = Beam3D().geometric_stiffness_matrix(
+            mat, nodes_horiz, {"section": sec}, self._compress_u()
+        )
+        assert K_g.shape == (12, 12)
+
+    def test_Kg_symmetric(self, mat, sec, nodes_horiz):
+        """K_g doit être symétrique."""
+        K_g = Beam3D().geometric_stiffness_matrix(
+            mat, nodes_horiz, {"section": sec}, self._compress_u()
+        )
+        np.testing.assert_allclose(K_g, K_g.T, atol=1e-20)
+
+    def test_Kg_axial_dofs_zero(self, mat, sec, nodes_horiz):
+        """DDL axiaux ux₁(0) et ux₂(6) : lignes et colonnes nulles."""
+        K_g = Beam3D().geometric_stiffness_matrix(
+            mat, nodes_horiz, {"section": sec}, self._compress_u()
+        )
+        # Poutre horizontale (e₁ = x_global) → local = global → indices 0 et 6
+        np.testing.assert_allclose(K_g[0, :], 0.0, atol=1e-20)
+        np.testing.assert_allclose(K_g[:, 0], 0.0, atol=1e-20)
+        np.testing.assert_allclose(K_g[6, :], 0.0, atol=1e-20)
+        np.testing.assert_allclose(K_g[:, 6], 0.0, atol=1e-20)
+
+    def test_Kg_negative_in_compression(self, mat, sec, nodes_horiz):
+        """Compression → K_g a des valeurs propres négatives."""
+        K_g = Beam3D().geometric_stiffness_matrix(
+            mat, nodes_horiz, {"section": sec}, self._compress_u(1e-6)
+        )
+        assert np.linalg.eigvalsh(K_g).min() < 0
+
+    def test_Kg_positive_in_tension(self, mat, sec, nodes_horiz):
+        """Traction → K_g a des valeurs propres non-négatives (semi-définie positive)."""
+        u_tension = np.zeros(12)
+        u_tension[6] = 1e-6   # ux₂ = +δ → traction
+        K_g = Beam3D().geometric_stiffness_matrix(
+            mat, nodes_horiz, {"section": sec}, u_tension
+        )
+        assert np.linalg.eigvalsh(K_g).min() >= -1e-12
+
+    def test_Kg_xy_block_matches_beam2d_formula(self, mat, sec):
+        """Bloc plan xy {uy₁,θz₁,uy₂,θz₂} identique à la formule Przemieniecki."""
+        L = 2.0
+        nodes = np.array([[0.0, 0.0, 0.0], [L, 0.0, 0.0]])
+        EA = mat.E * sec.area
+        delta = 1e-6
+        N = -EA * delta / L   # compression
+        a = N / (30.0 * L)
+
+        u_e = np.zeros(12)
+        u_e[6] = -delta
+
+        K_g = Beam3D().geometric_stiffness_matrix(mat, nodes, {"section": sec}, u_e)
+
+        # Bloc xy local : indices globaux = indices locaux (barre horizontale)
+        iy = [1, 5, 7, 11]
+        K_block = K_g[np.ix_(iy, iy)]
+        L2 = L * L
+        K_expected = a * np.array([
+            [ 36.0,  3.0 * L, -36.0,  3.0 * L],
+            [  3.0 * L,  4.0 * L2, -3.0 * L,       -L2],
+            [-36.0, -3.0 * L,  36.0, -3.0 * L],
+            [  3.0 * L,       -L2, -3.0 * L,  4.0 * L2],
+        ])
+        np.testing.assert_allclose(K_block, K_expected, rtol=1e-10)
+
+    def test_Kg_xz_block_opposite_coupling(self, mat, sec):
+        """Bloc plan xz {uz₁,θy₁,uz₂,θy₂} : couplages uz–θy renversés vs xy."""
+        L = 2.0
+        nodes = np.array([[0.0, 0.0, 0.0], [L, 0.0, 0.0]])
+        EA = mat.E * sec.area
+        delta = 1e-6
+        N = -EA * delta / L
+        a = N / (30.0 * L)
+        L2 = L * L
+
+        u_e = np.zeros(12)
+        u_e[6] = -delta
+
+        K_g = Beam3D().geometric_stiffness_matrix(mat, nodes, {"section": sec}, u_e)
+
+        # Bloc xz : indices [2,4,8,10]
+        iz = [2, 4, 8, 10]
+        K_block = K_g[np.ix_(iz, iz)]
+        K_expected = a * np.array([
+            [ 36.0, -3.0 * L, -36.0, -3.0 * L],
+            [ -3.0 * L,  4.0 * L2,  3.0 * L,        -L2],
+            [-36.0,  3.0 * L,  36.0,  3.0 * L],
+            [ -3.0 * L,        -L2,  3.0 * L,  4.0 * L2],
+        ])
+        np.testing.assert_allclose(K_block, K_expected, rtol=1e-10)
+
+        # Vérifier que les couplages uz–θy sont bien le négatif des couplages uy–θz
+        iy = [1, 5, 7, 11]
+        K_xy = K_g[np.ix_(iy, iy)]
+        # K_xz[0,1] = -K_xy[0,1], K_xz[0,3] = -K_xy[0,3], etc.
+        for row_i, col_j in [(0, 1), (0, 3), (1, 2), (2, 3)]:
+            np.testing.assert_allclose(
+                K_block[row_i, col_j], -K_xy[row_i, col_j], rtol=1e-10,
+                err_msg=f"K_xz[{row_i},{col_j}] ≠ −K_xy[{row_i},{col_j}]"
+            )
+
+    def test_Kg_torsion_block(self, mat, sec):
+        """Bloc torsion {θx₁(3),θx₂(9)} = N·(Ip/A)/L·[[1,−1],[−1,1]]."""
+        L = 1.5
+        nodes = np.array([[0.0, 0.0, 0.0], [L, 0.0, 0.0]])
+        EA = mat.E * sec.area
+        delta = 1e-6
+        N = -EA * delta / L
+        Ip_over_A = (sec.Iy + sec.Iz) / sec.area
+
+        u_e = np.zeros(12)
+        u_e[6] = -delta
+
+        K_g = Beam3D().geometric_stiffness_matrix(mat, nodes, {"section": sec}, u_e)
+
+        t = N * Ip_over_A / L
+        np.testing.assert_allclose(K_g[3, 3],  t, rtol=1e-10)
+        np.testing.assert_allclose(K_g[3, 9], -t, rtol=1e-10)
+        np.testing.assert_allclose(K_g[9, 3], -t, rtol=1e-10)
+        np.testing.assert_allclose(K_g[9, 9],  t, rtol=1e-10)
+
+
+# ---------------------------------------------------------------------------
+# Tests de flambage — colonne 3D (Beam3D)
+# ---------------------------------------------------------------------------
+
+class TestBucklingBeam3DColumn:
+    """Flambage d'une colonne 3D — comparaison avec la formule d'Euler.
+
+    Formule analytique :
+    - Pince-pincée : P_cr = π²EI/L²
+    - Encastrée-libre : P_cr = π²EI/(4L²)
+
+    Orientation : colonne le long de l'axe z global.
+    DDL Beam3D : [ux,uy,uz,θx,θy,θz] × 2 nœuds → 12 DDL/élément.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _setup(self):
+        self.E  = 210e9
+        self.nu = 0.3
+        self.b  = self.h = 0.01   # section carrée 10 × 10 mm
+        self.L  = 1.0
+        self.mat = ElasticMaterial(E=self.E, nu=self.nu, rho=7800)
+        # Section carrée : Iy = Iz = bh³/12 (symmetric)
+        self.sec = RectangularSection(width=self.b, height=self.h)
+        self.I  = self.b * self.h**3 / 12
+        self.P_cr_euler = np.pi**2 * self.E * self.I / self.L**2
+
+    def _build_pinpin_z(self, n_elem: int) -> tuple:
+        """Colonne verticale (axe z) pince-pincée sous compression."""
+        Le = self.L / n_elem
+        nodes = np.array([[0.0, 0.0, i * Le] for i in range(n_elem + 1)])
+        props = {"section": self.sec}
+        elements = tuple(
+            ElementData(Beam3D, (i, i + 1), self.mat, props)
+            for i in range(n_elem)
+        )
+        mesh = Mesh(nodes=nodes, elements=elements, n_dim=3, dof_per_node=6)
+
+        # DDL globaux pour Beam3D (ordre par nœud) :
+        # 6*i+0=ux, 6*i+1=uy, 6*i+2=uz, 6*i+3=θx, 6*i+4=θy, 6*i+5=θz
+        # Pince-pincée le long de z :
+        # - Nœud 0 (bas) : ux=0, uy=0, uz=0  (appui 3D)
+        # - Nœud n (haut) : ux=0, uy=0        (rouleau transversal, uz libre)
+        bc = BoundaryConditions(
+            dirichlet={
+                0:      {0: 0.0, 1: 0.0, 2: 0.0},
+                n_elem: {0: 0.0, 1: 0.0},
+            },
+            neumann={
+                n_elem: {2: -1.0},   # −1 N en z (compression)
+            },
+        )
+        return mesh, bc
+
+    def _build_cantilever_z(self, n_elem: int) -> tuple:
+        """Colonne verticale (axe z) encastrée à la base, libre au sommet."""
+        Le = self.L / n_elem
+        nodes = np.array([[0.0, 0.0, i * Le] for i in range(n_elem + 1)])
+        props = {"section": self.sec}
+        elements = tuple(
+            ElementData(Beam3D, (i, i + 1), self.mat, props)
+            for i in range(n_elem)
+        )
+        mesh = Mesh(nodes=nodes, elements=elements, n_dim=3, dof_per_node=6)
+
+        # Encastrement complet (tous les DDL bloqués)
+        bc = BoundaryConditions(
+            dirichlet={
+                0: {0: 0.0, 1: 0.0, 2: 0.0, 3: 0.0, 4: 0.0, 5: 0.0},
+            },
+            neumann={
+                n_elem: {2: -1.0},
+            },
+        )
+        return mesh, bc
+
+    def _run(self, mesh, bc, n_modes: int = 1):
+        assembler = Assembler(mesh)
+        K = assembler.assemble_stiffness()
+        F = assembler.assemble_forces(bc)
+        ds = apply_dirichlet(K, F, mesh, bc)
+        u  = StaticSolver().solve(*ds)
+        K_g      = assembler.assemble_geometric_stiffness(u)
+        K_g_free = ds.reduce(K_g)
+        lambda_cr, _ = BucklingSolver().solve(ds.K_free, K_g_free, n_modes=n_modes)
+        return lambda_cr
+
+    def test_euler_pinpin_20_elements(self):
+        """Colonne 3D pince-pincée — P_cr dans les 1 % de l'analytique."""
+        mesh, bc = self._build_pinpin_z(n_elem=20)
+        lambda_cr = self._run(mesh, bc, n_modes=1)
+        # P_ref = 1 N → P_cr = lambda_cr × 1
+        np.testing.assert_allclose(
+            float(lambda_cr[0]), self.P_cr_euler, rtol=0.01,
+            err_msg=f"P_cr FEM={float(lambda_cr[0]):.2f} N, analytique={self.P_cr_euler:.2f} N"
+        )
+
+    def test_euler_cantilever_20_elements(self):
+        """Colonne 3D encastrée-libre — P_cr dans les 1 % de l'analytique."""
+        P_cr_cant = self.P_cr_euler / 4.0
+        mesh, bc = self._build_cantilever_z(n_elem=20)
+        lambda_cr = self._run(mesh, bc, n_modes=1)
+        np.testing.assert_allclose(
+            float(lambda_cr[0]), P_cr_cant, rtol=0.01,
+            err_msg=f"P_cr FEM={float(lambda_cr[0]):.2f} N, analytique={P_cr_cant:.2f} N"
+        )
+
+    def test_higher_modes_n_squared_scaling(self):
+        """Modes supérieurs de la colonne 3D pince-pincée : P_n = n²·P_cr1."""
+        mesh, bc = self._build_pinpin_z(n_elem=30)
+        # Pour une section carrée, modes 1+2 sont dégénérés (mêmes dans xy et xz)
+        # On extrait 5 modes pour observer 1, 1, 4, 4, 9 (paires dégénérées)
+        lambda_cr = self._run(mesh, bc, n_modes=5)
+        lam = lambda_cr
+        # Modes 1 et 2 doivent être quasi-identiques (dégénérescence)
+        np.testing.assert_allclose(lam[0], lam[1], rtol=0.01,
+                                    err_msg="Modes 1 et 2 devraient être dégénérés")
+        # Mode 3 ≈ 4 × mode 1 (2ème harmonique, plan xy)
+        np.testing.assert_allclose(lam[2] / lam[0], 4.0, rtol=0.02)
+
+    def test_convergence_to_beam2d_planar(self):
+        """P_cr Beam3D converge vers P_cr Beam2D pour un cas plan (flexion forte).
+
+        Section rectangulaire non-carrée (Iz > Iy) : le mode de flambage
+        dans le plan xy (flexion forte) doit donner la même charge critique
+        que Beam2D avec la même inertie Iz.
+        """
+        # Section 20 × 10 mm : Iz (flexion forte) >> Iy (flexion faible)
+        b_sec = 0.01   # largeur (z) — flexion faible Iy
+        h_sec = 0.02   # hauteur (y) — flexion forte Iz
+        sec_3d = RectangularSection(width=b_sec, height=h_sec)
+        Iz = b_sec * h_sec**3 / 12   # inertie de flexion forte
+        Iy = h_sec * b_sec**3 / 12   # inertie de flexion faible
+        assert Iy < Iz  # le mode faible est dans le plan xz local
+
+        P_cr_weak = np.pi**2 * self.E * Iy / self.L**2
+        P_cr_strong = np.pi**2 * self.E * Iz / self.L**2
+        n_elem = 20
+
+        # ── Beam3D ──────────────────────────────────────────────────
+        Le = self.L / n_elem
+        nodes = np.array([[0.0, 0.0, i * Le] for i in range(n_elem + 1)])
+        props_3d = {"section": sec_3d}
+        elements_3d = tuple(
+            ElementData(Beam3D, (i, i + 1), self.mat, props_3d)
+            for i in range(n_elem)
+        )
+        mesh_3d = Mesh(nodes=nodes, elements=elements_3d, n_dim=3, dof_per_node=6)
+        bc_3d = BoundaryConditions(
+            dirichlet={
+                0:      {0: 0.0, 1: 0.0, 2: 0.0},
+                n_elem: {0: 0.0, 1: 0.0},
+            },
+            neumann={n_elem: {2: -1.0}},
+        )
+        lam_3d = self._run(mesh_3d, bc_3d, n_modes=2)
+        # Le premier mode est le flambage selon l'axe faible (Iy)
+        np.testing.assert_allclose(
+            float(lam_3d[0]), P_cr_weak, rtol=0.01,
+            err_msg="Beam3D mode faible ≠ Beam2D Iy"
+        )
+        # Le second mode est le flambage selon l'axe fort (Iz)
+        np.testing.assert_allclose(
+            float(lam_3d[1]), P_cr_strong, rtol=0.01,
+            err_msg="Beam3D mode fort ≠ Beam2D Iz"
+        )
+
+        # ── Beam2D (axe faible) ──────────────────────────────────────
+        nodes_2d = np.array([[0.0, i * Le] for i in range(n_elem + 1)])
+        props_2d = {"area": sec_3d.area, "inertia": Iy}
+        elements_2d = tuple(
+            ElementData(Beam2D, (i, i + 1), self.mat, props_2d)
+            for i in range(n_elem)
+        )
+        mesh_2d = Mesh(nodes=nodes_2d, elements=elements_2d, n_dim=2, dof_per_node=3)
+        bc_2d = BoundaryConditions(
+            dirichlet={
+                0:      {0: 0.0, 1: 0.0},
+                n_elem: {0: 0.0},
+            },
+            neumann={n_elem: {1: -1.0}},
+        )
+        assembler_2d = Assembler(mesh_2d)
+        K_2d = assembler_2d.assemble_stiffness()
+        F_2d = assembler_2d.assemble_forces(bc_2d)
+        ds_2d = apply_dirichlet(K_2d, F_2d, mesh_2d, bc_2d)
+        u_2d = StaticSolver().solve(*ds_2d)
+        Kg_2d = assembler_2d.assemble_geometric_stiffness(u_2d)
+        Kg_free_2d = ds_2d.reduce(Kg_2d)
+        lam_2d, _ = BucklingSolver().solve(ds_2d.K_free, Kg_free_2d, n_modes=1)
+
+        # Les deux solveurs (Beam3D et Beam2D) donnent le même P_cr
+        np.testing.assert_allclose(
+            float(lam_3d[0]), float(lam_2d[0]), rtol=0.001,
+            err_msg="Beam3D mode faible doit concorder avec Beam2D"
+        )

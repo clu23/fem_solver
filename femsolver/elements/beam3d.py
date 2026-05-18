@@ -715,8 +715,149 @@ class Beam3D(Element):
         return M_e
 
     # ------------------------------------------------------------------
+    # Matrice de rigidité géométrique locale
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _geometric_stiffness_local(
+        N: float,
+        L: float,
+        Ip_over_A: float,
+    ) -> np.ndarray:
+        """K_g 12×12 en repère local due à l'effort normal N.
+
+        Formulation Przemieniecki (1968), ch. 12 — plan xy, plan xz et torsion.
+
+        Parameters
+        ----------
+        N : float
+            Effort normal [N]. Positif = traction, négatif = compression.
+        L : float
+            Longueur de l'élément [m].
+        Ip_over_A : float
+            Rapport (Iy + Iz) / A [m²] — carré du rayon de giration polaire.
+
+        Returns
+        -------
+        K_g_local : np.ndarray, shape (12, 12)
+            Matrice de rigidité géométrique locale symétrique.
+
+        Notes
+        -----
+        Plan xy {uy₁(1), θz₁(5), uy₂(7), θz₂(11)} — même structure que Beam2D.
+        Plan xz {uz₁(2), θy₁(4), uz₂(8), θy₂(10)} — couplages uz–θy inversés
+        car θy = −duz/dx (règle de la main droite).
+        Torsion {θx₁(3), θx₂(9)} — N·(Ip/A)/L × [[1,−1],[−1,1]].
+        DDL axiaux {ux₁(0), ux₂(6)} — contribution nulle.
+        """
+        K_g = np.zeros((12, 12))
+        a = N / (30.0 * L)
+        L2 = L * L
+
+        # ── Plan xy : {uy₁(1), θz₁(5), uy₂(7), θz₂(11)} ───────────────────
+        # θz = +duy/dx → couplages uz₁–θy₁ positifs
+        iy = [1, 5, 7, 11]
+        K_g_xy = a * np.array([
+            [ 36.0,  3.0 * L, -36.0,  3.0 * L],
+            [  3.0 * L,  4.0 * L2, -3.0 * L,        -L2],
+            [-36.0, -3.0 * L,  36.0, -3.0 * L],
+            [  3.0 * L,       -L2, -3.0 * L,  4.0 * L2],
+        ])
+        for i, gi in enumerate(iy):
+            for j, gj in enumerate(iy):
+                K_g[gi, gj] = K_g_xy[i, j]
+
+        # ── Plan xz : {uz₁(2), θy₁(4), uz₂(8), θy₂(10)} ───────────────────
+        # θy = −duz/dx → couplages uz–θy négatifs (signe inversé vs plan xy)
+        iz = [2, 4, 8, 10]
+        K_g_xz = a * np.array([
+            [ 36.0, -3.0 * L, -36.0, -3.0 * L],
+            [ -3.0 * L,  4.0 * L2,  3.0 * L,        -L2],
+            [-36.0,  3.0 * L,  36.0,  3.0 * L],
+            [ -3.0 * L,       -L2,  3.0 * L,  4.0 * L2],
+        ])
+        for i, gi in enumerate(iz):
+            for j, gj in enumerate(iz):
+                K_g[gi, gj] = K_g_xz[i, j]
+
+        # ── Torsion : {θx₁(3), θx₂(9)} ─────────────────────────────────────
+        # Source : variation second ordre de l'énergie sous charge N
+        # δ²W_t = (1/2) N (Ip/A) ∫ (dθx/dx)² dx  avec θx linéaire → K_g/L
+        t = N * Ip_over_A / L
+        K_g[3, 3] =  t
+        K_g[3, 9] = -t
+        K_g[9, 3] = -t
+        K_g[9, 9] =  t
+
+        return K_g
+
+    # ------------------------------------------------------------------
     # Post-traitement : efforts internes
     # ------------------------------------------------------------------
+
+    def geometric_stiffness_matrix(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        u_e: np.ndarray,
+    ) -> np.ndarray:
+        """Matrice de rigidité géométrique 12×12 en repère global.
+
+        Calcule K_g à partir de l'effort normal N de l'état pré-flambement.
+        Inclut la flexion dans les deux plans locaux (xy et xz) et la
+        rigidité de torsion géométrique (effet Wagner sous charge axiale).
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+        nodes : np.ndarray, shape (2, 3)
+            Coordonnées 3D [[x₁,y₁,z₁], [x₂,y₂,z₂]].
+        properties : dict
+            Même interface que :meth:`stiffness_matrix`.
+            Clé obligatoire : ``"section"``.
+        u_e : np.ndarray, shape (12,)
+            Déplacements nodaux de l'état pré-flambement en repère global.
+
+        Returns
+        -------
+        K_g_e : np.ndarray, shape (12, 12)
+            Matrice de rigidité géométrique élémentaire symétrique.
+            Négative (semi-définie) en compression pure.
+
+        Notes
+        -----
+        N = EA/L · (ux₂_local − ux₁_local)  — positif en traction.
+
+        Le terme de torsion K_g[θx,θx] = N·(Ip/A)/L empêche le flambement
+        par torsion pure sous charge axiale. Pour les sections à âme mince
+        (I, C), l'effet de gauchissement (warping) est ignoré ici (Iw = 0)
+        car Beam3D ne dispose pas d'un DDL de gauchissement.
+
+        Références : Przemieniecki (1968), chap. 12 ; Cook et al. (2002),
+        chap. 5.
+        """
+        v_vec = properties.get("v_vec",    None)
+        off_i = properties.get("offset_i", None)
+        off_j = properties.get("offset_j", None)
+
+        L, lam = self._local_frame(nodes, v_vec)
+        EA, EIy, EIz, GJ, GAsy, GAsz = self._beam_props(material, properties)
+        sec: Section = properties["section"]
+        Ip_over_A = (sec.Iy + sec.Iz) / sec.area
+
+        T = self._rotation_matrix(lam)
+        u_local = T @ u_e
+        N = EA / L * (u_local[6] - u_local[0])   # positif = traction
+
+        K_g_local = self._geometric_stiffness_local(N, L, Ip_over_A)
+        K_g = T.T @ K_g_local @ T
+
+        T_off = self._offset_transform(off_i, off_j)
+        if T_off is not None:
+            K_g = T_off.T @ K_g @ T_off
+
+        return K_g
 
     def section_forces(
         self,
