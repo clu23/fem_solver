@@ -1,4 +1,4 @@
-"""Module dynamique — analyse modale, harmonique et transitoire."""
+"""Module dynamique — analyse modale, harmonique, transitoire et aléatoire."""
 
 from femsolver.dynamics.modal import ModalResult, lumped_mass, run_modal
 from femsolver.dynamics.rayleigh import (
@@ -13,6 +13,16 @@ from femsolver.dynamics.harmonic import (
     solve_harmonic,
     solve_harmonic_hysteretic,
     solve_harmonic_modal,
+)
+from femsolver.dynamics.random_response import (
+    RandomResult,
+    compute_rms,
+    influence_vector,
+    miles_equation,
+    psd_white,
+    run_random_base,
+    run_random_force,
+    solve_random_force,
 )
 from femsolver.dynamics.transient import (
     NEWMARK_CENTRAL_DIFF,
@@ -47,4 +57,12 @@ __all__ = [
     "TransientResult",
     "solve_newmark",
     "run_transient",
+    "RandomResult",
+    "compute_rms",
+    "influence_vector",
+    "miles_equation",
+    "psd_white",
+    "run_random_base",
+    "run_random_force",
+    "solve_random_force",
 ]
