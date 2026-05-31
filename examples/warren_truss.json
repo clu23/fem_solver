@@ -1,0 +1,48 @@
+{
+  "name": "Warren Truss",
+  "description": "Treillis Warren à 9 nœuds, 15 barres Bar2D, chargement au milieu de la membrure inférieure. Portée 4 m, hauteur 1 m, acier 210 GPa, A = 1e-4 m².",
+  "materials": {
+    "steel": { "E": 210e9, "nu": 0.3, "rho": 7800 }
+  },
+  "nodes": [
+    [0.0, 0.0],
+    [1.0, 0.0],
+    [2.0, 0.0],
+    [3.0, 0.0],
+    [4.0, 0.0],
+    [0.5, 1.0],
+    [1.5, 1.0],
+    [2.5, 1.0],
+    [3.5, 1.0]
+  ],
+  "elements": [
+    {"type": "Bar2D", "nodes": [0, 1], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [1, 2], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [2, 3], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [3, 4], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [5, 6], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [6, 7], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [7, 8], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [0, 5], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [1, 5], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [1, 6], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [2, 6], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [2, 7], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [3, 7], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [3, 8], "material": "steel", "area": 1e-4},
+    {"type": "Bar2D", "nodes": [4, 8], "material": "steel", "area": 1e-4}
+  ],
+  "boundary_conditions": {
+    "dirichlet": [
+      {"node": 0, "dof": 0, "value": 0.0},
+      {"node": 0, "dof": 1, "value": 0.0},
+      {"node": 4, "dof": 1, "value": 0.0}
+    ],
+    "neumann": [
+      {"node": 2, "dof": 1, "value": -10000.0}
+    ]
+  },
+  "analysis": {
+    "type": "static"
+  }
+}

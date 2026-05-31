@@ -1,0 +1,35 @@
+{
+  "name": "Cantilever Modal",
+  "description": "Analyse modale d'une poutre console Beam2D — 11 nœuds, 10 éléments, 3 premiers modes. Acier 210 GPa, section rect. 50×100 mm, L=1 m.",
+  "materials": {
+    "steel": { "E": 210e9, "nu": 0.3, "rho": 7800 }
+  },
+  "nodes": [
+    [0.0, 0.0], [0.1, 0.0], [0.2, 0.0], [0.3, 0.0], [0.4, 0.0],
+    [0.5, 0.0], [0.6, 0.0], [0.7, 0.0], [0.8, 0.0], [0.9, 0.0],
+    [1.0, 0.0]
+  ],
+  "elements": [
+    {"type": "Beam2D", "nodes": [0,  1], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10}},
+    {"type": "Beam2D", "nodes": [1,  2], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10}},
+    {"type": "Beam2D", "nodes": [2,  3], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10}},
+    {"type": "Beam2D", "nodes": [3,  4], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10}},
+    {"type": "Beam2D", "nodes": [4,  5], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10}},
+    {"type": "Beam2D", "nodes": [5,  6], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10}},
+    {"type": "Beam2D", "nodes": [6,  7], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10}},
+    {"type": "Beam2D", "nodes": [7,  8], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10}},
+    {"type": "Beam2D", "nodes": [8,  9], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10}},
+    {"type": "Beam2D", "nodes": [9, 10], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10}}
+  ],
+  "boundary_conditions": {
+    "dirichlet": [
+      {"node": 0, "dof": 0, "value": 0.0},
+      {"node": 0, "dof": 1, "value": 0.0},
+      {"node": 0, "dof": 2, "value": 0.0}
+    ]
+  },
+  "analysis": {
+    "type": "modal",
+    "n_modes": 3
+  }
+}
