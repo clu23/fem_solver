@@ -233,14 +233,37 @@ def read_mesh(
 
 # Correspondance : classe femsolver → type de cellule meshio
 def _cell_type_for(etype: type) -> str:
+    from femsolver.elements.bar2d import Bar2D
+    from femsolver.elements.beam2d import Beam2D
+    from femsolver.elements.beam2d_timoshenko import Beam2DTimoshenko
+    from femsolver.elements.beam3d import Beam3D
     from femsolver.elements.hexa8 import Hexa8
+    from femsolver.elements.hexa20 import Hexa20
+    from femsolver.elements.quad4 import Quad4
+    from femsolver.elements.quad8 import Quad8
     from femsolver.elements.tetra4 import Tetra4
-    mapping = {Hexa8: "hexahedron", Tetra4: "tetra"}
+    from femsolver.elements.tetra10 import Tetra10
+    from femsolver.elements.tri3 import Tri3
+    from femsolver.elements.tri6 import Tri6
+    mapping = {
+        Bar2D: "line",
+        Beam2D: "line",
+        Beam2DTimoshenko: "line",
+        Beam3D: "line",
+        Tri3: "triangle",
+        Tri6: "triangle6",
+        Quad4: "quad",
+        Quad8: "quad8",
+        Tetra4: "tetra",
+        Tetra10: "tetra10",
+        Hexa8: "hexahedron",
+        Hexa20: "hexahedron20",
+    }
     result = mapping.get(etype)
     if result is None:
         raise ValueError(
             f"Export VTK non supporté pour l'élément '{etype.__name__}'. "
-            f"Types supportés : {list(mapping.keys())}"
+            f"Types supportés : {[t.__name__ for t in mapping]}"
         )
     return result
 
@@ -303,7 +326,16 @@ def write_vtu(
     point_data: dict[str, np.ndarray] = {}
 
     if u is not None:
-        u_nodes = u.reshape(-1, mesh.n_dim)
+        # For beam elements dpn > n_dim: extract translational DOFs only.
+        n = mesh.n_nodes
+        dpn = mesh.dpn
+        nd = mesh.n_dim
+        if dpn == nd:
+            u_nodes = u.reshape(n, nd)
+        else:
+            u_nodes = np.zeros((n, nd))
+            for i in range(n):
+                u_nodes[i] = u[i * dpn: i * dpn + nd]
         if mesh.n_dim == 2:
             # VTK/ParaView attend des vecteurs 3D
             u3d = np.zeros((mesh.n_nodes, 3))

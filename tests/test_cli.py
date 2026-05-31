@@ -50,6 +50,29 @@ STATIC_DATA = {
     "analysis": {"type": "static"},
 }
 
+CANTILEVER_JSON_DATA = {
+    "name": "Cantilever",
+    "materials": {"mat": {"E": 210e9, "nu": 0.3, "rho": 7800}},
+    "nodes": [[0.0, 0.0], [0.5, 0.0], [1.0, 0.0]],
+    "elements": [
+        {
+            "type": "Beam2D", "nodes": [0, 1], "material": "mat",
+            "section": {"type": "rectangular", "width": 0.05, "height": 0.10},
+        },
+        {
+            "type": "Beam2D", "nodes": [1, 2], "material": "mat",
+            "section": {"type": "rectangular", "width": 0.05, "height": 0.10},
+        },
+    ],
+    "boundary_conditions": {
+        "dirichlet": [
+            {"node": 0, "dof": 0}, {"node": 0, "dof": 1}, {"node": 0, "dof": 2}
+        ],
+        "neumann": [{"node": 2, "dof": 1, "value": -5000.0}],
+    },
+    "analysis": {"type": "static"},
+}
+
 MODAL_DATA = {
     "name": "Test Modal",
     "materials": {"mat": {"E": 210e9, "nu": 0.3, "rho": 7800}},
@@ -215,6 +238,77 @@ class TestRun:
         _, out, _ = _run(["run", str(p)], capsys)
         assert "u_max" in out.lower() or "déplacement" in out.lower()
 
+    def test_static_displays_top5_nodes(self, tmp_path, capsys):
+        """Le tableau Top-5 nœuds les plus déplacés est affiché."""
+        p = _make_json(tmp_path, STATIC_DATA)
+        _, out, _ = _run(["run", str(p)], capsys)
+        assert "Top 5" in out
+
+    def test_static_displays_reactions(self, tmp_path, capsys):
+        """Les réactions d'appui sont affichées."""
+        p = _make_json(tmp_path, STATIC_DATA)
+        _, out, _ = _run(["run", str(p)], capsys)
+        assert "Réactions" in out or "réaction" in out.lower()
+
+    def test_static_displays_equilibrium(self, tmp_path, capsys):
+        """Le bilan d'équilibre est affiché avec ✓."""
+        p = _make_json(tmp_path, STATIC_DATA)
+        _, out, _ = _run(["run", str(p)], capsys)
+        assert "équilibre" in out.lower() or "Bilan" in out
+        assert "✓" in out
+
+    def test_truss_displays_bar_forces(self, capsys):
+        """Le treillis Warren affiche les efforts de barre Top-5."""
+        _, out, _ = _run(["run", "examples/warren_truss.json"], capsys)
+        assert "traction" in out.lower() or "compression" in out.lower()
+
+    def test_non_truss_no_bar_forces(self, tmp_path, capsys):
+        """Pour une poutre (Beam2D), pas de section 'barres'."""
+        p = _make_json(tmp_path, CANTILEVER_JSON_DATA)
+        _, out, _ = _run(["run", str(p)], capsys)
+        assert "traction" not in out.lower()
+
+    def test_detailed_shows_all_nodes(self, tmp_path, capsys):
+        """--detailed affiche tous les nœuds dans le tableau complet."""
+        p = _make_json(tmp_path, STATIC_DATA)
+        _, out, _ = _run(["run", str(p), "--detailed"], capsys)
+        assert "Tableau complet" in out
+        # 2 nœuds → ligne 0 et ligne 1 dans le tableau
+        assert "     0 " in out
+        assert "     1 " in out
+
+    def test_detailed_absent_without_flag(self, tmp_path, capsys):
+        """Sans --detailed, le tableau complet n'est pas affiché."""
+        p = _make_json(tmp_path, STATIC_DATA)
+        _, out, _ = _run(["run", str(p)], capsys)
+        assert "Tableau complet" not in out
+
+    def test_export_vtu_creates_file(self, tmp_path, capsys):
+        """--export crée un fichier .vtu."""
+        p = _make_json(tmp_path, STATIC_DATA)
+        vtu = tmp_path / "out.vtu"
+        rc, out, _ = _run(["run", str(p), "--export", str(vtu)], capsys)
+        assert rc == 0
+        assert vtu.exists()
+        assert "Exporté" in out
+
+    def test_export_quiet_still_writes_file(self, tmp_path, capsys):
+        """--export + --quiet ne produit aucune sortie mais écrit le fichier."""
+        p = _make_json(tmp_path, STATIC_DATA)
+        vtu = tmp_path / "silent.vtu"
+        rc, out, _ = _run(["run", str(p), "--export", str(vtu), "--quiet"], capsys)
+        assert rc == 0
+        assert out == ""
+        assert vtu.exists()
+
+    def test_beam_export_vtu(self, tmp_path, capsys):
+        """Export VTU fonctionne pour une poutre Beam2D (dpn != n_dim)."""
+        p = _make_json(tmp_path, CANTILEVER_JSON_DATA)
+        vtu = tmp_path / "beam.vtu"
+        rc, _, _ = _run(["run", str(p), "--export", str(vtu), "--quiet"], capsys)
+        assert rc == 0
+        assert vtu.exists()
+
     def test_modal_displays_frequencies(self, tmp_path, capsys):
         p = _make_json(tmp_path, MODAL_DATA)
         _, out, _ = _run(["run", str(p)], capsys)
@@ -259,6 +353,13 @@ class TestRun:
         p = _make_json(tmp_path, STATIC_DATA)
         _, out, _ = _run(["run", str(p)], capsys)
         assert "static" in out
+
+    def test_dof_labels_beam2d(self, tmp_path, capsys):
+        """La troisième colonne DDL d'un Beam2D est 'θz', pas 'uz'."""
+        p = _make_json(tmp_path, CANTILEVER_JSON_DATA)
+        _, out, _ = _run(["run", str(p), "--detailed"], capsys)
+        assert "θz" in out
+        assert "uz" not in out
 
 
 # ---------------------------------------------------------------------------

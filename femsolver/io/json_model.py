@@ -573,6 +573,33 @@ def run_from_json(
     >>> results["u"]   # déplacements nodaux [m]
     """
     model = load_model(path)
+    return solve_model(model, verbose=verbose)
+
+
+def solve_model(model: FEModel, *, verbose: bool = True) -> dict[str, Any]:
+    """Résout un FEModel déjà chargé et retourne les résultats.
+
+    Sépare le chargement (``load_model``) de la résolution, ce qui permet
+    au code appelant (p. ex. le CLI) d'accéder au modèle sans double parsing.
+
+    Parameters
+    ----------
+    model : FEModel
+        Modèle chargé par ``load_model``.
+    verbose : bool
+        Si ``True``, journalise un résumé des résultats via ``logging``.
+
+    Returns
+    -------
+    dict[str, Any]
+        Résultats sérialisables. Mêmes clés que ``run_from_json``.
+
+    Examples
+    --------
+    >>> model = load_model("examples/warren_truss.json")
+    >>> results = solve_model(model)
+    >>> results["u"]
+    """
     mesh = model.mesh
     bc = model.bc
     analysis = model.analysis
