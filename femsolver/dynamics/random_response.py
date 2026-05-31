@@ -233,8 +233,8 @@ def influence_vector(mesh: Mesh, direction: int) -> np.ndarray:
             f"direction={direction} hors des dimensions du maillage (n_dim={mesh.n_dim})."
         )
     r = np.zeros(mesh.n_dof)
-    dpn = mesh.dof_per_node
-    n_nodes = mesh.n_dof // dpn
+    dpn = mesh.dpn
+    n_nodes = mesh.n_nodes
     for i in range(n_nodes):
         # Les DDL de translation sont les indices 0..n_dim-1 dans le nœud
         r[i * dpn + direction] = 1.0

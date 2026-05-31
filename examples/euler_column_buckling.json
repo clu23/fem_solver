@@ -1,0 +1,50 @@
+{
+  "name": "Flambage Colonne Euler — encastrée-libre",
+  "description": "Colonne verticale encastrée à la base, libre au sommet. 20 éléments Beam2D, section carrée 10×10 mm, L=1 m, acier E=210 GPa. Charge de référence P_ref=1 N axiale (compression). Solution analytique : P_cr = π²EI/(4L²) = 431.9 N → λ_cr = 431.9.",
+  "materials": {
+    "steel": { "E": 210e9, "nu": 0.3, "rho": 7800 }
+  },
+  "nodes": [
+    [0.0, 0.00], [0.0, 0.05], [0.0, 0.10], [0.0, 0.15], [0.0, 0.20],
+    [0.0, 0.25], [0.0, 0.30], [0.0, 0.35], [0.0, 0.40], [0.0, 0.45],
+    [0.0, 0.50], [0.0, 0.55], [0.0, 0.60], [0.0, 0.65], [0.0, 0.70],
+    [0.0, 0.75], [0.0, 0.80], [0.0, 0.85], [0.0, 0.90], [0.0, 0.95],
+    [0.0, 1.00]
+  ],
+  "elements": [
+    { "type": "Beam2D", "nodes": [0,  1],  "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [1,  2],  "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [2,  3],  "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [3,  4],  "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [4,  5],  "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [5,  6],  "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [6,  7],  "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [7,  8],  "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [8,  9],  "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [9,  10], "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [10, 11], "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [11, 12], "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [12, 13], "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [13, 14], "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [14, 15], "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [15, 16], "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [16, 17], "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [17, 18], "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [18, 19], "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} },
+    { "type": "Beam2D", "nodes": [19, 20], "material": "steel", "section": {"type": "rectangular", "width": 0.01, "height": 0.01} }
+  ],
+  "boundary_conditions": {
+    "dirichlet": [
+      {"node": 0, "dof": 0, "value": 0.0},
+      {"node": 0, "dof": 1, "value": 0.0},
+      {"node": 0, "dof": 2, "value": 0.0}
+    ],
+    "neumann": [
+      {"node": 20, "dof": 1, "value": -1.0}
+    ]
+  },
+  "analysis": {
+    "type": "buckling",
+    "n_modes": 1
+  }
+}

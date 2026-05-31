@@ -1,0 +1,38 @@
+{
+  "name": "Réponse aléatoire PSD — base excitation SDOF",
+  "description": "Oscillateur 1-DDL (Bar2D) soumis à une excitation aléatoire à la base. Masse m=1 kg, raideur k=1000 N/m. Masse effective m_eff=m/3≈0.333 kg (masse consistante). Fréquence propre fn=sqrt(k/m_eff)/(2π)≈8.72 Hz. Amortissement ξ=5% (Rayleigh β-seul). PSD bruit blanc G0=0.01 (m/s²)²/Hz. Formule analytique: σ_u_rel=sqrt(G0/(8ξωn³))≈1.17 mm, σ_a_Miles=sqrt(πfnG0/(4ξ))≈0.120 m/s². Le résultat rms_u[1] (DDL uy libre) doit correspondre à σ_u_rel.",
+  "materials": {
+    "bar": {
+      "E": 210e9,
+      "nu": 0.3,
+      "rho": 2.1e8
+    }
+  },
+  "nodes": [
+    [0.0, 0.0],
+    [0.0, 1.0]
+  ],
+  "elements": [
+    {
+      "type": "Bar2D",
+      "nodes": [0, 1],
+      "material": "bar",
+      "area": 4.7619e-9
+    }
+  ],
+  "boundary_conditions": {
+    "dirichlet": [
+      {"node": 0, "dof": 0, "value": 0.0},
+      {"node": 0, "dof": 1, "value": 0.0},
+      {"node": 1, "dof": 0, "value": 0.0}
+    ],
+    "neumann": []
+  },
+  "analysis": {
+    "type": "random_base",
+    "freqs": {"linspace": [0.5, 120.0, 3000]},
+    "G0": 0.01,
+    "direction": 1,
+    "damping": {"type": "rayleigh", "alpha": 0.0, "beta": 1.824e-3}
+  }
+}

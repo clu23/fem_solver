@@ -1,0 +1,39 @@
+{
+  "name": "Transitoire — Impact échelon sur poutre console",
+  "description": "Intégration temporelle Newmark-β (γ=0.5, β=0.25 — trapèze inconditionnel). Poutre console 10 éléments Beam2D, L=1 m, section rect. 50×100 mm, acier. Force échelon F=1000 N appliquée en bout (nœud 10, uy) à t=0. Durée 0.1 s = 8.4 × T1 (T1=1/83.8 Hz ≈ 0.012 s). Amortissement Rayleigh 5% au 1er mode (β=1.9e-4 s). Déplacement statique δ_st = FL³/(3EI) ≈ 0.381 mm; amplitude maximale ≈ 2δ_st (facteur dynamique DAF=2 à t=T1/2 sans amortissement).",
+  "materials": {
+    "steel": { "E": 210e9, "nu": 0.3, "rho": 7800 }
+  },
+  "nodes": [
+    [0.0, 0.0], [0.1, 0.0], [0.2, 0.0], [0.3, 0.0], [0.4, 0.0],
+    [0.5, 0.0], [0.6, 0.0], [0.7, 0.0], [0.8, 0.0], [0.9, 0.0],
+    [1.0, 0.0]
+  ],
+  "elements": [
+    { "type": "Beam2D", "nodes": [0,  1], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10} },
+    { "type": "Beam2D", "nodes": [1,  2], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10} },
+    { "type": "Beam2D", "nodes": [2,  3], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10} },
+    { "type": "Beam2D", "nodes": [3,  4], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10} },
+    { "type": "Beam2D", "nodes": [4,  5], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10} },
+    { "type": "Beam2D", "nodes": [5,  6], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10} },
+    { "type": "Beam2D", "nodes": [6,  7], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10} },
+    { "type": "Beam2D", "nodes": [7,  8], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10} },
+    { "type": "Beam2D", "nodes": [8,  9], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10} },
+    { "type": "Beam2D", "nodes": [9, 10], "material": "steel", "section": {"type": "rectangular", "width": 0.05, "height": 0.10} }
+  ],
+  "boundary_conditions": {
+    "dirichlet": [
+      {"node": 0, "dof": 0, "value": 0.0},
+      {"node": 0, "dof": 1, "value": 0.0},
+      {"node": 0, "dof": 2, "value": 0.0}
+    ],
+    "neumann": []
+  },
+  "analysis": {
+    "type": "transient",
+    "dt": 5e-5,
+    "n_steps": 2000,
+    "F_hat": [{"node": 10, "dof": 1, "value": 1000.0}],
+    "damping": {"type": "rayleigh", "alpha": 0.0, "beta": 1.9e-4}
+  }
+}

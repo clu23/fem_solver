@@ -1,0 +1,58 @@
+{
+  "name": "Portique 3D — Beam3D, charge horizontale",
+  "description": "Portique plan dans le plan x-y : 2 colonnes (H=3 m) + 1 poutre horizontale (L=4 m). 4 nœuds, 3 éléments Beam3D. Section rectangulaire 50×100 mm (acier E=210 GPa). Colonnes encastrées à la base. Charge horizontale Fx=10 kN au sommet de la colonne gauche (nœud 1). Axe fort (Iz) orienté pour la flexion dans le plan du portique : v_vec=[1,0,0] pour les colonnes (e2=x), v_vec=[0,1,0] pour la traverse (e2=y). Déflexion latérale attendue : 50–150 mm (entre les bornes du portique infiniment rigide et des deux consoles indépendantes).",
+  "materials": {
+    "steel": { "E": 210e9, "nu": 0.3, "rho": 7800 }
+  },
+  "nodes": [
+    [0.0, 0.0, 0.0],
+    [0.0, 3.0, 0.0],
+    [4.0, 3.0, 0.0],
+    [4.0, 0.0, 0.0]
+  ],
+  "elements": [
+    {
+      "type": "Beam3D",
+      "nodes": [0, 1],
+      "material": "steel",
+      "section": {"type": "rectangular", "width": 0.05, "height": 0.10},
+      "v_vec": [1.0, 0.0, 0.0]
+    },
+    {
+      "type": "Beam3D",
+      "nodes": [1, 2],
+      "material": "steel",
+      "section": {"type": "rectangular", "width": 0.05, "height": 0.10},
+      "v_vec": [0.0, 1.0, 0.0]
+    },
+    {
+      "type": "Beam3D",
+      "nodes": [3, 2],
+      "material": "steel",
+      "section": {"type": "rectangular", "width": 0.05, "height": 0.10},
+      "v_vec": [1.0, 0.0, 0.0]
+    }
+  ],
+  "boundary_conditions": {
+    "dirichlet": [
+      {"node": 0, "dof": 0, "value": 0.0},
+      {"node": 0, "dof": 1, "value": 0.0},
+      {"node": 0, "dof": 2, "value": 0.0},
+      {"node": 0, "dof": 3, "value": 0.0},
+      {"node": 0, "dof": 4, "value": 0.0},
+      {"node": 0, "dof": 5, "value": 0.0},
+      {"node": 3, "dof": 0, "value": 0.0},
+      {"node": 3, "dof": 1, "value": 0.0},
+      {"node": 3, "dof": 2, "value": 0.0},
+      {"node": 3, "dof": 3, "value": 0.0},
+      {"node": 3, "dof": 4, "value": 0.0},
+      {"node": 3, "dof": 5, "value": 0.0}
+    ],
+    "neumann": [
+      {"node": 1, "dof": 0, "value": 10000.0}
+    ]
+  },
+  "analysis": {
+    "type": "static"
+  }
+}
