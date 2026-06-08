@@ -2,7 +2,7 @@
 
 Solveur éléments finis pour la mécanique des solides, écrit en Python. Couvre l'analyse statique, le flambage, la dynamique modale et transitoire, et la réponse aléatoire (PSD). Les modèles se définissent en JSON et se lancent en une commande.
 
-**828 tests · 12 types d'éléments · 7 types d'analyse · Python 3.11+**
+**857 tests · 14 types d'éléments · 7 types d'analyse · Python 3.11+**
 
 ---
 
@@ -41,6 +41,10 @@ python -m femsolver run examples/warren_truss.json
 | `Tetra10` | 3D | 3 | Tétraèdre quadratique |
 | `Hexa8` | 3D | 3 | Hexaèdre linéaire, 2×2×2 Gauss |
 | `Hexa20` | 3D | 3 | Hexaèdre sérendipité, 3×3×3 Gauss |
+| `Spring` | 2D/3D | flexible | Ressort ponctuel (CBUSH) — 2 nœuds ou sol, translation/rotation |
+| `Damper` | 2D/3D | flexible | Amortisseur visqueux ponctuel (CBUSH) — 2 nœuds ou sol |
+
+Les connecteurs ponctuels `Spring` / `Damper` sont alignés sur les axes globaux et sans matériau : la raideur (`stiffness`) ou le coefficient visqueux (`damping`) est fourni DDL par DDL. L'amortisseur s'assemble dans une matrice C globale qui s'ajoute à l'amortissement de Rayleigh dans les analyses dynamiques visqueuses.
 
 Toutes les matrices globales (K, M) sont creuses (`scipy.sparse.csr_matrix`). Les matrices élémentaires restent denses (4×4 à 60×60).
 
@@ -202,6 +206,8 @@ Chaque fichier est exécutable directement : `python -m femsolver run examples/<
 | `transient_impact_beam.json` | Transitoire | Force échelon 1 kN sur console, Newmark 2000 pas Δt=50 µs. DAF=1.83 (borne théorique 2 sans amortissement). |
 | `random_base_sdof.json` | Aléatoire base | SDOF Bar2D, k=1 kN/m, m=1 kg, G₀=0.01 (m/s²)²/Hz. σ_u=0.39 mm et σ_a=1.17 m/s² — Miles err < 0.4 %. |
 | `portal_frame_3d.json` | Statique 3D | Portique Beam3D 4 nœuds, F_x=10 kN. Réactions d'encastrement 3D, bilan d'équilibre toutes directions. |
+| `spring_support_static.json` | Statique | Barre Bar2D + ressort ponctuel `Spring` (appui élastique). Cohabitation élément structural / connecteur. Exact : u₁ₓ=FₓL/(EA), u₁ᵧ=Fᵧ/kᵧ, équilibre vérifié. |
+| `damper_harmonic_sdof.json` | Harmonique | SDOF Bar2D amorti par un amortisseur ponctuel `Damper` seul (ζ=5 %). Pic de résonance fini à f≈5.03 Hz, amplitude≈F/(k·2ζ)=0.1 m. |
 
 ---
 
@@ -249,7 +255,9 @@ fem-solver/
 │   │   ├── tri3.py / tri6.py
 │   │   ├── quad4.py / quad8.py
 │   │   ├── tetra4.py / tetra10.py
-│   │   └── hexa8.py / hexa20.py
+│   │   ├── hexa8.py / hexa20.py
+│   │   ├── spring.py            # SpringElement — ressort ponctuel (CBUSH)
+│   │   └── damper.py            # DamperElement — amortisseur visqueux ponctuel
 │   ├── dynamics/
 │   │   ├── modal.py             # run_modal → ModalResult (freqs, omega, modes)
 │   │   ├── harmonic.py          # run_harmonic (Rayleigh / hystérétique / modal)

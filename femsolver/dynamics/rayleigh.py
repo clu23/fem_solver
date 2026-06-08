@@ -292,3 +292,15 @@ def build_damping_matrix(
 
     C = damping.alpha * M + damping.beta * K
     return C.tocsr()
+
+
+# Message partagé : les amortisseurs discrets (DamperElement) sont visqueux et
+# ne se combinent qu'avec un amortissement visqueux (None ou Rayleigh). Les
+# formulations hystérétique et modale utilisent des solveurs spécialisés qui
+# n'acceptent pas une matrice C visqueuse additionnelle.
+_DISCRETE_DAMPER_INCOMPATIBLE = (
+    "Des amortisseurs discrets (DamperElement) sont présents mais "
+    "l'amortissement global est hystérétique ou modal. Les amortisseurs "
+    "visqueux ponctuels ne se combinent qu'avec un amortissement None ou "
+    "Rayleigh. Retirez les amortisseurs ou passez à un amortissement de Rayleigh."
+)

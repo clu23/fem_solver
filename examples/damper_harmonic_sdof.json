@@ -1,0 +1,29 @@
+{
+  "name": "Amortisseur ponctuel — réponse harmonique SDOF",
+  "description": "Oscillateur 1-DDL bâti sur une barre Bar2D (raideur axiale + masse consistante) amorti par un amortisseur ponctuel au sol (type CBUSH). Aucun amortissement de Rayleigh : l'amortissement provient UNIQUEMENT du DamperElement, assemblé dans la matrice C globale. Matériau ajusté E=1e6 Pa, rho=3000, A=1e-3 m², L=1 m → raideur k=EA/L=1000 N/m, masse effective m_eff=rho·A·L/3=1 kg. Fréquence propre f_n=sqrt(k/m)/(2π)≈5.033 Hz. Amortisseur c=3.162 N·s/m sur le DDL x (damping=[3.162, 0]) → taux d'amortissement ζ=c/(2·sqrt(k·m))=0.05 (5%). Le nœud 0 est encastré, le nœud 1 est libre en x (uy bloqué : une barre horizontale n'a pas de raideur transverse). Force harmonique Fx=10 N au nœud 1. Pic de résonance fini près de 5.0 Hz, amplitude ≈ F/(k·2ζ)=0.1 m.",
+  "materials": {
+    "soft": { "E": 1.0e6, "nu": 0.3, "rho": 3000.0 }
+  },
+  "nodes": [
+    [0.0, 0.0],
+    [1.0, 0.0]
+  ],
+  "elements": [
+    {"type": "Bar2D", "nodes": [0, 1], "material": "soft", "area": 1.0e-3},
+    {"type": "Damper", "nodes": [1], "damping": [3.162, 0.0]}
+  ],
+  "boundary_conditions": {
+    "dirichlet": [
+      {"node": 0, "dof": 0, "value": 0.0},
+      {"node": 0, "dof": 1, "value": 0.0},
+      {"node": 1, "dof": 1, "value": 0.0}
+    ],
+    "neumann": []
+  },
+  "analysis": {
+    "type": "harmonic",
+    "freqs": {"linspace": [1.0, 15.0, 400]},
+    "F_hat": [{"node": 1, "dof": 0, "value": 10.0}],
+    "damping": null
+  }
+}

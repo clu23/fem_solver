@@ -84,7 +84,11 @@ from femsolver.core.assembler import Assembler
 from femsolver.core.boundary import apply_dirichlet
 from femsolver.core.mesh import BoundaryConditions, Mesh
 from femsolver.dynamics.damping import HystereticDamping, ModalDampingModel
-from femsolver.dynamics.rayleigh import RayleighDamping, build_damping_matrix
+from femsolver.dynamics.rayleigh import (
+    _DISCRETE_DAMPER_INCOMPATIBLE,
+    RayleighDamping,
+    build_damping_matrix,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -489,14 +493,23 @@ def run_transient(
     K_free = ds.K_free
     M_free = ds.reduce_mass(M)
 
+    # Amortissement visqueux discret (DamperElement) — C nulle si aucun amortisseur
+    C_disc = assembler.assemble_damping()
+    has_disc = C_disc.nnz > 0
+    C_disc_free = ds.reduce(C_disc) if has_disc else None
+
     # Matrice d'amortissement
     if damping is None:
         n_free = len(free)
-        C_free = csr_matrix((n_free, n_free))
+        C_free = C_disc_free if has_disc else csr_matrix((n_free, n_free))
     elif isinstance(damping, RayleighDamping):
         C      = build_damping_matrix(damping, M, K)
         C_free = C[free, :][:, free].tocsr()
+        if has_disc:
+            C_free = (C_free + C_disc_free).tocsr()
     else:  # ModalDampingModel
+        if has_disc:
+            raise NotImplementedError(_DISCRETE_DAMPER_INCOMPATIBLE)
         C      = damping.build_C_physical(M)
         C_free = C[free, :][:, free].tocsr()
 

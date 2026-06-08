@@ -213,6 +213,47 @@ class Element(ABC):
             "Implémenter dans la sous-classe pour activer l'analyse de flambage."
         )
 
+    def damping_matrix(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+    ) -> np.ndarray:
+        """Matrice d'amortissement visqueux élémentaire C_e en repère global.
+
+        Seuls les éléments d'amortissement discrets (DamperElement) fournissent
+        une matrice non triviale. Les éléments structuraux classiques n'ont pas
+        d'amortissement propre (il provient du modèle de Rayleigh / modal,
+        appliqué aux matrices globales M et K).
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (non utilisé pour un amortisseur ponctuel).
+        nodes : np.ndarray, shape (n_elem_nodes, n_dim)
+            Coordonnées des nœuds de l'élément.
+        properties : dict
+            Propriétés (``"damping"`` pour DamperElement : coefficients
+            visqueux par DDL [N·s/m]).
+
+        Returns
+        -------
+        C_e : np.ndarray, shape (n_dof_elem, n_dof_elem)
+            Matrice d'amortissement visqueux élémentaire.
+
+        Raises
+        ------
+        NotImplementedError
+            Pour tout élément qui n'est pas un amortisseur discret.
+            ``Assembler.assemble_damping()`` ignore silencieusement ces
+            éléments.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} n'implémente pas damping_matrix(). "
+            "Seul DamperElement fournit un amortissement visqueux discret ; "
+            "l'amortissement structural passe par le modèle de Rayleigh / modal."
+        )
+
     def distributed_load_vector(
         self,
         material: ElasticMaterial,

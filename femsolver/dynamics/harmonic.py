@@ -75,7 +75,11 @@ from femsolver.core.assembler import Assembler
 from femsolver.core.boundary import apply_dirichlet
 from femsolver.core.mesh import BoundaryConditions, Mesh
 from femsolver.dynamics.damping import HystereticDamping, ModalDampingModel
-from femsolver.dynamics.rayleigh import RayleighDamping, build_damping_matrix
+from femsolver.dynamics.rayleigh import (
+    _DISCRETE_DAMPER_INCOMPATIBLE,
+    RayleighDamping,
+    build_damping_matrix,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -404,21 +408,32 @@ def run_harmonic(
     M_free = ds.reduce_mass(M)
     F_free = F_hat[free].astype(float)
 
+    # Amortissement visqueux discret (DamperElement) — C nulle si aucun amortisseur
+    C_disc = assembler.assemble_damping()
+    has_disc = C_disc.nnz > 0
+    C_disc_free = ds.reduce(C_disc) if has_disc else None
+
     # Dispatch selon le type d'amortissement
     if damping is None:
         n_free = len(free)
-        C_free = csr_matrix((n_free, n_free))
+        C_free = C_disc_free if has_disc else csr_matrix((n_free, n_free))
         U_free = solve_harmonic(K_free, M_free, C_free, F_free, freqs)
 
     elif isinstance(damping, RayleighDamping):
         C      = build_damping_matrix(damping, M, K)
         C_free = C[free, :][:, free].tocsr()
+        if has_disc:
+            C_free = (C_free + C_disc_free).tocsr()
         U_free = solve_harmonic(K_free, M_free, C_free, F_free, freqs)
 
     elif isinstance(damping, HystereticDamping):
+        if has_disc:
+            raise NotImplementedError(_DISCRETE_DAMPER_INCOMPATIBLE)
         U_free = solve_harmonic_hysteretic(K_free, M_free, damping.eta, F_free, freqs)
 
     elif isinstance(damping, ModalDampingModel):
+        if has_disc:
+            raise NotImplementedError(_DISCRETE_DAMPER_INCOMPATIBLE)
         # phi stocké en taille complète (n_dof, n_modes) — extraire les DDL libres
         phi_free = damping.phi[free, :]
         U_free   = solve_harmonic_modal(

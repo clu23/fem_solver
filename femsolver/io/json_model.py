@@ -67,10 +67,12 @@ from femsolver.elements.bar2d import Bar2D
 from femsolver.elements.beam2d import Beam2D
 from femsolver.elements.beam2d_timoshenko import Beam2DTimoshenko
 from femsolver.elements.beam3d import Beam3D
+from femsolver.elements.damper import DamperElement
 from femsolver.elements.hexa20 import Hexa20
 from femsolver.elements.hexa8 import Hexa8
 from femsolver.elements.quad4 import Quad4
 from femsolver.elements.quad8 import Quad8
+from femsolver.elements.spring import SpringElement
 from femsolver.elements.tetra10 import Tetra10
 from femsolver.elements.tetra4 import Tetra4
 from femsolver.elements.tri3 import Tri3
@@ -95,6 +97,8 @@ _ELEM_REGISTRY: dict[str, type] = {
     "Tetra10": Tetra10,
     "Hexa8": Hexa8,
     "Hexa20": Hexa20,
+    "Spring": SpringElement,
+    "Damper": DamperElement,
 }
 
 # n_dim and dof_per_node (None = use n_dim)
@@ -112,6 +116,15 @@ _ELEM_META: dict[str, tuple[int, int | None]] = {
     "Hexa8":            (3, None),
     "Hexa20":           (3, None),
 }
+
+# Éléments « DDL-flexibles » : ressort et amortisseur ponctuels. Leur nombre de
+# DDL par nœud n'est pas fixe — il est déduit de la longueur du vecteur de
+# raideur / amortissement et doit coïncider avec le ``dof_per_node`` du maillage.
+# Le matériau y est optionnel (un connecteur ponctuel n'a pas de matériau continu).
+_FLEX_ELEMS: frozenset[str] = frozenset({"Spring", "Damper"})
+
+# Matériau factice pour les éléments flexibles sans clé "material".
+_FLEX_MATERIAL = ElasticMaterial(E=1.0, nu=0.0, rho=1.0)
 
 _SECTION_REGISTRY: dict[str, type] = {
     "rectangular":        RectangularSection,
@@ -245,9 +258,35 @@ def _parse_element_properties(elem_type: str, edict: dict[str, Any]) -> dict:
         if "thickness" in edict:
             props["thickness"] = float(edict["thickness"])
 
+    elif elem_type == "Spring":
+        props["stiffness"] = _as_float_list(edict["stiffness"])
+
+    elif elem_type == "Damper":
+        props["damping"] = _as_float_list(edict["damping"])
+
     # Tetra4, Tetra10, Hexa8, Hexa20 — pas de propriétés supplémentaires
 
     return props
+
+
+def _as_float_list(value: Any) -> list[float]:
+    """Normalise une raideur / un amortissement en liste de réels.
+
+    Accepte un scalaire (→ liste à un élément) ou une liste. La longueur du
+    résultat fixe le nombre de DDL par nœud du connecteur ponctuel.
+
+    Parameters
+    ----------
+    value : float or list
+        Valeur(s) JSON (``"stiffness"`` ou ``"damping"``).
+
+    Returns
+    -------
+    list[float]
+    """
+    if isinstance(value, (list, tuple)):
+        return [float(v) for v in value]
+    return [float(value)]
 
 
 def _parse_freqs(freqs_spec: Any) -> np.ndarray:
@@ -396,7 +435,8 @@ def _build_mesh_and_bc(data: dict[str, Any]) -> tuple[Mesh, BoundaryConditions]:
         raise ValueError("Le modèle ne contient aucun élément.")
 
     elements_list: list[ElementData] = []
-    dof_per_node_inferred: int | None = None
+    dpn_common: int | None = None     # DDL/nœud effectif, commun à tout le maillage
+    any_explicit_dpn = False          # True si un élément impose un dpn ≠ n_dim
 
     for edict in elem_dicts:
         etype_name = edict["type"]
@@ -406,25 +446,48 @@ def _build_mesh_and_bc(data: dict[str, Any]) -> tuple[Mesh, BoundaryConditions]:
                 f"Type d'élément inconnu : '{etype_name}'. Connus : {known}"
             )
         elem_cls = _ELEM_REGISTRY[etype_name]
-        _, dpn = _ELEM_META[etype_name]
 
-        # Inférer dof_per_node (doit être cohérent pour tout le maillage)
-        if dof_per_node_inferred is None:
-            dof_per_node_inferred = dpn
-        elif dof_per_node_inferred != dpn:
+        # DDL par nœud effectif. Pour les éléments flexibles (Spring/Damper) il
+        # est déduit de la longueur du vecteur raideur/amortissement ; sinon des
+        # métadonnées (None ⇒ n_dim).
+        if etype_name in _FLEX_ELEMS:
+            vec_key = "stiffness" if etype_name == "Spring" else "damping"
+            if vec_key not in edict:
+                raise ValueError(
+                    f"L'élément '{etype_name}' requiert la clé '{vec_key}'."
+                )
+            dpn_eff = len(_as_float_list(edict[vec_key]))
+            explicit = True
+        else:
+            _, meta_dpn = _ELEM_META[etype_name]
+            dpn_eff = meta_dpn if meta_dpn is not None else n_dim
+            explicit = meta_dpn is not None
+
+        # Cohérence du dof_per_node sur tout le maillage
+        if dpn_common is None:
+            dpn_common = dpn_eff
+        elif dpn_common != dpn_eff:
             raise ValueError(
                 f"Mélange de dof_per_node incompatibles dans les éléments : "
-                f"{dof_per_node_inferred} vs {dpn} pour '{etype_name}'"
+                f"{dpn_common} vs {dpn_eff} pour '{etype_name}'"
             )
+        any_explicit_dpn = any_explicit_dpn or explicit
 
-        # Matériau
-        mat_key = edict["material"]
-        if mat_key not in materials:
+        # Matériau — optionnel pour les connecteurs ponctuels (Spring/Damper)
+        if "material" in edict:
+            mat_key = edict["material"]
+            if mat_key not in materials:
+                raise ValueError(
+                    f"Matériau '{mat_key}' non défini. Matériaux disponibles : "
+                    f"{list(materials)}"
+                )
+            material = materials[mat_key]
+        elif etype_name in _FLEX_ELEMS:
+            material = _FLEX_MATERIAL
+        else:
             raise ValueError(
-                f"Matériau '{mat_key}' non défini. Matériaux disponibles : "
-                f"{list(materials)}"
+                f"L'élément '{etype_name}' requiert une clé 'material'."
             )
-        material = materials[mat_key]
 
         node_ids = tuple(int(n) for n in edict["nodes"])
         props = _parse_element_properties(etype_name, edict)
@@ -432,11 +495,15 @@ def _build_mesh_and_bc(data: dict[str, Any]) -> tuple[Mesh, BoundaryConditions]:
             ElementData(etype=elem_cls, node_ids=node_ids, material=material, properties=props)
         )
 
+    # dof_per_node passé au maillage : None si tous les éléments suivent n_dim
+    # (comportement historique), sinon la valeur explicite commune.
+    dof_per_node_mesh = dpn_common if any_explicit_dpn else None
+
     mesh = Mesh(
         nodes=nodes,
         elements=tuple(elements_list),
         n_dim=n_dim,
-        dof_per_node=dof_per_node_inferred,
+        dof_per_node=dof_per_node_mesh,
     )
 
     # --- Conditions aux limites ---

@@ -105,9 +105,46 @@ Chaque élément est un objet avec au minimum `type`, `nodes` et `material`.
 | `Tetra10` | 3 | 3 | — |
 | `Hexa8` | 3 | 3 | — |
 | `Hexa20` | 3 | 3 | — |
+| `Spring` | 2/3 | flexible | `stiffness` (réel ou liste par DDL) |
+| `Damper` | 2/3 | flexible | `damping` (réel ou liste par DDL) |
 
 **Règle :** tous les éléments d'un même maillage doivent avoir le même nombre
 de DDL par nœud. On ne peut pas mélanger `Bar2D` (2 DDL) et `Beam2D` (3 DDL).
+
+### Connecteurs ponctuels : `Spring` et `Damper`
+
+Ressort et amortisseur ponctuels (type CBUSH de Nastran), alignés sur les axes
+globaux. Ils relient **deux nœuds** (`"nodes": [i, j]`) ou **un nœud et le sol**
+(`"nodes": [i]`), en 1D, 2D ou 3D :
+
+- ressort sol  : `K_e = diag(k)` ;
+- ressort 2 nœuds : `K_e = [[diag(k), −diag(k)], [−diag(k), diag(k)]]`
+  (idem pour l'amortisseur avec `damping`).
+
+Spécificités :
+
+- **Pas de `material`** : la clé est optionnelle (un connecteur ponctuel n'a pas
+  de matériau continu). Le coefficient est donné directement.
+- **DDL flexible** : la longueur du vecteur `stiffness` / `damping` fixe le
+  nombre de DDL par nœud et **doit égaler** le `dof_per_node` du maillage. Une
+  valeur nulle désactive le DDL correspondant.
+- `Spring` agit en statique et dans toutes les analyses (sa raideur entre dans K).
+- `Damper` n'apporte qu'un amortissement visqueux, assemblé dans la matrice C.
+  Il agit dans les analyses dynamiques **visqueuses** (harmonique, transitoire,
+  réponse aléatoire) avec amortissement `None` ou `rayleigh`, et s'**ajoute** à
+  l'amortissement de Rayleigh. Il est incompatible avec un amortissement
+  hystérétique ou modal (le solveur lève alors une erreur explicite).
+
+```jsonc
+"elements": [
+    // ressort au sol, modèle 2D : kx=1e5, ky=2e5 [N/m]
+    {"type": "Spring", "nodes": [0], "stiffness": [1.0e5, 2.0e5]},
+    // ressort entre 2 nœuds, raideur en y seulement
+    {"type": "Spring", "nodes": [0, 1], "stiffness": [0.0, 5.0e5]},
+    // amortisseur au sol, c_x=3.16 [N·s/m], c_y=0
+    {"type": "Damper", "nodes": [1], "damping": [3.162, 0.0]}
+]
+```
 
 ### Propriétés de section pour Beam2D / Beam2DTimoshenko
 

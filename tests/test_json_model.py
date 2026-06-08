@@ -632,3 +632,127 @@ class TestDampingParsing:
     def test_unknown_raises(self):
         with pytest.raises(ValueError, match="inconnu"):
             self._damp({"type": "viscous"})
+
+
+# ---------------------------------------------------------------------------
+# Ressorts et amortisseurs ponctuels (Spring / Damper)
+# ---------------------------------------------------------------------------
+
+class TestSpringDamperParsing:
+    """Parsing JSON des connecteurs ponctuels : DDL flexible, matériau optionnel."""
+
+    def test_spring_only_infers_dof_per_node_from_stiffness(self):
+        """Modèle 100 % ressorts : dpn déduit de la longueur du vecteur stiffness."""
+        model = _load_inline(json.dumps({
+            "name": "ground springs",
+            "nodes": [[0.0, 0.0], [1.0, 0.0]],
+            "elements": [
+                {"type": "Spring", "nodes": [0], "stiffness": [1.0e5, 2.0e5]},
+                {"type": "Spring", "nodes": [1], "stiffness": [3.0e5, 4.0e5]},
+            ],
+            "boundary_conditions": {"dirichlet": [], "neumann": []},
+            "analysis": {"type": "static"},
+        }))
+        assert model.mesh.dpn == 2
+        assert model.mesh.n_dof == 4
+
+    def test_spring_material_optional(self):
+        """Aucune clé 'material' n'est requise pour un ressort."""
+        model = _load_inline(json.dumps({
+            "name": "no material",
+            "nodes": [[0.0, 0.0]],
+            "elements": [{"type": "Spring", "nodes": [0], "stiffness": [1000.0]}],
+            "boundary_conditions": {"dirichlet": [], "neumann": []},
+            "analysis": {"type": "static"},
+        }))
+        assert len(model.mesh.elements) == 1
+
+    def test_mixed_spring_bar_dof_consistency(self):
+        """Spring (stiffness longueur 2) compatible avec Bar2D (dpn=2)."""
+        model = _load_inline(json.dumps({
+            "name": "bar + spring",
+            "materials": {"steel": {"E": 210e9, "nu": 0.3, "rho": 7800}},
+            "nodes": [[0.0, 0.0], [1.0, 0.0]],
+            "elements": [
+                {"type": "Bar2D", "nodes": [0, 1], "material": "steel", "area": 1e-4},
+                {"type": "Spring", "nodes": [0, 1], "stiffness": [0.0, 5.0e5]},
+            ],
+            "boundary_conditions": {"dirichlet": [], "neumann": []},
+            "analysis": {"type": "static"},
+        }))
+        assert model.mesh.dpn == 2
+
+    def test_spring_dof_mismatch_raises(self):
+        """Spring de longueur 3 incompatible avec Bar2D (dpn=2) → erreur."""
+        with pytest.raises(ValueError, match="incompatibles"):
+            _load_inline(json.dumps({
+                "name": "mismatch",
+                "materials": {"steel": {"E": 210e9, "nu": 0.3, "rho": 7800}},
+                "nodes": [[0.0, 0.0], [1.0, 0.0]],
+                "elements": [
+                    {"type": "Bar2D", "nodes": [0, 1], "material": "steel", "area": 1e-4},
+                    {"type": "Spring", "nodes": [0], "stiffness": [1.0, 2.0, 3.0]},
+                ],
+                "boundary_conditions": {"dirichlet": [], "neumann": []},
+                "analysis": {"type": "static"},
+            }))
+
+    def test_spring_static_u_equals_F_over_k(self):
+        """Bar + ressort vertical : u1_x=Fx·L/(EA), u1_y=Fy/k_y (exemple livré)."""
+        result = run_from_json("examples/spring_support_static.json", verbose=False)
+        u = np.array(result["u"])
+        # nœud 1 : indices 2 (ux) et 3 (uy)
+        np.testing.assert_allclose(u[2], 21000.0 / 2.1e7, rtol=1e-10)   # 1.0e-3 m
+        np.testing.assert_allclose(u[3], -5000.0 / 5.0e5, rtol=1e-10)   # -1.0e-2 m
+
+    def test_damper_optional_material(self):
+        """Un amortisseur se parse sans clé 'material'."""
+        model = _load_inline(json.dumps({
+            "name": "damper",
+            "nodes": [[0.0, 0.0]],
+            "elements": [{"type": "Damper", "nodes": [0], "damping": [10.0]}],
+            "boundary_conditions": {"dirichlet": [], "neumann": []},
+            "analysis": {"type": "static"},
+        }))
+        assert model.mesh.elements[0].properties["damping"] == [10.0]
+
+    def test_damper_harmonic_finite_peak(self):
+        """Amortisseur ponctuel seul → pic de résonance fini près de f_n=5.03 Hz."""
+        result = run_from_json("examples/damper_harmonic_sdof.json", verbose=False)
+        f = np.array(result["freqs"])
+        amp = np.array(result["amplitude"])
+        ax = amp[2, :]   # DDL x du nœud 1
+        i_peak = int(ax.argmax())
+        f_n = np.sqrt(1000.0 / 1.0) / (2.0 * np.pi)
+        np.testing.assert_allclose(f[i_peak], f_n, rtol=0.02)
+        # Pic fini et proche de F/(k·2ζ) = 10/(1000·0.1) = 0.1 m
+        np.testing.assert_allclose(ax[i_peak], 0.1, rtol=0.05)
+
+    def test_damper_reduces_response_vs_undamped(self):
+        """Le pic amorti (ζ=5%) est bien inférieur au pic quasi non amorti."""
+        damped = run_from_json("examples/damper_harmonic_sdof.json", verbose=False)
+        peak_damped = np.array(damped["amplitude"])[2, :].max()
+
+        # Même modèle sans amortisseur (amortisseur c≈0) → pic bien plus grand
+        undamped = _run_inline(json.dumps({
+            "name": "undamped",
+            "materials": {"soft": {"E": 1.0e6, "nu": 0.3, "rho": 3000.0}},
+            "nodes": [[0.0, 0.0], [1.0, 0.0]],
+            "elements": [
+                {"type": "Bar2D", "nodes": [0, 1], "material": "soft", "area": 1.0e-3},
+                {"type": "Damper", "nodes": [1], "damping": [0.05, 0.0]},
+            ],
+            "boundary_conditions": {"dirichlet": [
+                {"node": 0, "dof": 0, "value": 0.0},
+                {"node": 0, "dof": 1, "value": 0.0},
+                {"node": 1, "dof": 1, "value": 0.0},
+            ], "neumann": []},
+            "analysis": {
+                "type": "harmonic",
+                "freqs": {"linspace": [1.0, 15.0, 400]},
+                "F_hat": [{"node": 1, "dof": 0, "value": 10.0}],
+                "damping": None,
+            },
+        }))
+        peak_undamped = np.array(undamped["amplitude"])[2, :].max()
+        assert peak_undamped > 5.0 * peak_damped

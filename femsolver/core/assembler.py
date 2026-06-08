@@ -626,6 +626,56 @@ class Assembler:
         vals = np.concatenate(vals_list) if vals_list else np.array([], dtype=float)
         return coo_matrix((vals, (rows, cols)), shape=(n_dof, n_dof)).tocsr()
 
+    def assemble_damping(self) -> csr_matrix:
+        """Assemble la matrice d'amortissement visqueux discret C (format CSR).
+
+        Collecte les contributions des éléments d'amortissement ponctuels
+        (DamperElement) via ``element.damping_matrix()``. Les éléments qui
+        n'implémentent pas cette méthode (tous les éléments structuraux) sont
+        ignorés silencieusement (``NotImplementedError`` capturée).
+
+        Cette matrice est **distincte** de l'amortissement de Rayleigh / modal,
+        qui dérive des matrices globales M et K. Elle s'ajoute à ce dernier dans
+        les solveurs dynamiques :  C_total = C_Rayleigh + C_discret.
+
+        Returns
+        -------
+        C : csr_matrix, shape (n_dof, n_dof)
+            Matrice d'amortissement visqueux discret, creuse et symétrique.
+            Entièrement nulle si le maillage ne contient aucun amortisseur.
+
+        Examples
+        --------
+        >>> C = Assembler(mesh).assemble_damping()
+        >>> C.shape   # (n_dof, n_dof)
+        """
+        mesh = self.mesh
+        n_dof = mesh.n_dof
+        rows_list: list[np.ndarray] = []
+        cols_list: list[np.ndarray] = []
+        vals_list: list[np.ndarray] = []
+
+        for elem_data in mesh.elements:
+            elem = elem_data.get_element()
+            try:
+                node_coords = mesh.node_coords(elem_data.node_ids)
+                C_e = elem.damping_matrix(
+                    elem_data.material, node_coords, elem_data.properties
+                )
+            except NotImplementedError:
+                continue
+
+            dofs = np.array(mesh.global_dofs(elem_data.node_ids))
+            r, c, v = _scatter_coo_batch(C_e[np.newaxis], dofs[np.newaxis])
+            rows_list.append(r)
+            cols_list.append(c)
+            vals_list.append(v)
+
+        rows = np.concatenate(rows_list) if rows_list else np.array([], dtype=int)
+        cols = np.concatenate(cols_list) if cols_list else np.array([], dtype=int)
+        vals = np.concatenate(vals_list) if vals_list else np.array([], dtype=float)
+        return coo_matrix((vals, (rows, cols)), shape=(n_dof, n_dof)).tocsr()
+
     def assemble_forces(self, bc: BoundaryConditions) -> np.ndarray:
         """Assemble le vecteur de forces nodales F à partir des conditions aux limites.
 

@@ -84,7 +84,11 @@ from femsolver.core.assembler import Assembler
 from femsolver.core.boundary import apply_dirichlet
 from femsolver.core.mesh import BoundaryConditions, Mesh
 from femsolver.dynamics.damping import HystereticDamping, ModalDampingModel
-from femsolver.dynamics.rayleigh import RayleighDamping, build_damping_matrix
+from femsolver.dynamics.rayleigh import (
+    _DISCRETE_DAMPER_INCOMPATIBLE,
+    RayleighDamping,
+    build_damping_matrix,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -372,14 +376,29 @@ def _build_C_free(
     M: csr_matrix,
     K: csr_matrix,
     free: np.ndarray,
+    C_disc_free: csr_matrix | None = None,
 ) -> csr_matrix:
-    """Construire C_free pour amortissement visqueux (Rayleigh ou zéro)."""
+    """Construire C_free pour amortissement visqueux (Rayleigh ou zéro).
+
+    ``C_disc_free`` est la contribution des amortisseurs discrets (DamperElement)
+    déjà réduite aux DDL libres, ou ``None`` s'il n'y en a aucun. Elle s'ajoute
+    à l'amortissement None / Rayleigh ; elle est incompatible avec les
+    formulations hystérétique et modale (solveurs FRF spécialisés).
+    """
     n_free = len(free)
+    has_disc = C_disc_free is not None and C_disc_free.nnz > 0
     if damping is None:
-        return csr_matrix((n_free, n_free))
+        return C_disc_free if has_disc else csr_matrix((n_free, n_free))
     if isinstance(damping, RayleighDamping):
         C = build_damping_matrix(damping, M, K)
-        return C[free, :][:, free].tocsr()
+        C_free = C[free, :][:, free].tocsr()
+        if has_disc:
+            C_free = (C_free + C_disc_free).tocsr()
+        return C_free
+    # Hystérétique / modal : FRF spécialisée (C_free ignorée). Les amortisseurs
+    # discrets n'y sont pas pris en charge.
+    if has_disc:
+        raise NotImplementedError(_DISCRETE_DAMPER_INCOMPATIBLE)
     return csr_matrix((n_free, n_free))
 
 
@@ -493,7 +512,9 @@ def run_random_force(
 
     K_free = ds.K_free
     M_free = ds.reduce_mass(M)
-    C_free = _build_C_free(damping, M, K, free)
+    C_disc = assembler.assemble_damping()
+    C_disc_free = ds.reduce(C_disc) if C_disc.nnz > 0 else None
+    C_free = _build_C_free(damping, M, K, free, C_disc_free)
     F_dir_free = F_direction[free].astype(float)
 
     H = _dispatch_frf(damping, K_free, M_free, C_free, F_dir_free, freqs, free)
@@ -586,7 +607,9 @@ def run_random_base(
 
     K_free = ds.K_free
     M_free = ds.reduce_mass(M)
-    C_free = _build_C_free(damping, M, K, free)
+    C_disc = assembler.assemble_damping()
+    C_disc_free = ds.reduce(C_disc) if C_disc.nnz > 0 else None
+    C_free = _build_C_free(damping, M, K, free, C_disc_free)
 
     # Vecteur d'influence aux DDL libres
     r_full = influence_vector(mesh, direction)
