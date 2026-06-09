@@ -122,6 +122,18 @@ def _translational_dofs(mesh: Mesh) -> list[int]:
     return [dpn * i + d for i in range(mesh.n_nodes) for d in range(n_dim)]
 
 
+# Description humaine (français) de chaque DDL local, indexée par étiquette.
+# kind ∈ {"translation", "rotation"} ; description : texte lisible.
+_DOF_DESCRIPTION = {
+    "UX":  ("translation", "translation ux"),
+    "UY":  ("translation", "translation uy"),
+    "UZ":  ("translation", "translation uz"),
+    "THX": ("rotation",    "rotation θx"),
+    "THY": ("rotation",    "rotation θy"),
+    "THZ": ("rotation",    "rotation θz"),
+}
+
+
 # ---------------------------------------------------------------------------
 # 1. Vérification de la masse et du centre de gravité
 # ---------------------------------------------------------------------------
@@ -553,3 +565,274 @@ def run_diagnostics(
         equilibrium_residuals = residuals,
         equilibrium_ok      = ok,
     )
+
+
+# ---------------------------------------------------------------------------
+# 5. Détection de mécanismes (DDL non contraints) — pré-résolution
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class UnconstrainedDof:
+    """Un DDL libre dépourvu de toute raideur (mécanisme ponctuel).
+
+    Attributes
+    ----------
+    node_id : int
+        Indice du nœud.
+    local_dof : int
+        DDL local (0..dpn-1).
+    label : str
+        Étiquette courte (ex. ``"THZ"``).
+    kind : str
+        ``"translation"`` ou ``"rotation"``.
+    description : str
+        Texte lisible en français (ex. ``"rotation θz"``).
+    diagonal : float
+        Valeur du terme diagonal K[i, i] (≈ 0 par définition).
+    """
+
+    node_id: int
+    local_dof: int
+    label: str
+    kind: str
+    description: str
+    diagonal: float
+
+
+@dataclass(frozen=True)
+class MechanismReport:
+    """Résultat de la détection de mécanismes.
+
+    Attributes
+    ----------
+    unconstrained : tuple[UnconstrainedDof, ...]
+        DDL libres sans raideur, triés par (nœud, DDL local).
+    n_free_dofs : int
+        Nombre de DDL libres (non bloqués par Dirichlet).
+    n_constrained_dofs : int
+        Nombre de DDL bloqués par Dirichlet.
+    smallest_eigenvalue : float or None
+        Plus petite valeur propre de K_free si ``eigensolve=True``, sinon None.
+        Une valeur ≈ 0 indique un mécanisme global (mode de corps rigide ou
+        mécanisme interne) même si tous les termes diagonaux sont non nuls.
+    """
+
+    unconstrained: tuple[UnconstrainedDof, ...]
+    n_free_dofs: int
+    n_constrained_dofs: int
+    smallest_eigenvalue: float | None = None
+
+    @property
+    def has_mechanism(self) -> bool:
+        """True si au moins un DDL libre est dépourvu de raideur."""
+        return len(self.unconstrained) > 0
+
+    def messages(self) -> list[str]:
+        """Messages d'avertissement lisibles, un par nœud problématique.
+
+        Returns
+        -------
+        list[str]
+            Ex. ``["Nœud 7 : rotation θz non contrainte"]``.  Lorsqu'un nœud
+            a plusieurs DDL libres, ils sont regroupés sur une ligne.
+        """
+        by_node: dict[int, list[UnconstrainedDof]] = {}
+        for u in self.unconstrained:
+            by_node.setdefault(u.node_id, []).append(u)
+
+        out: list[str] = []
+        for node_id in sorted(by_node):
+            descs = [u.description for u in by_node[node_id]]
+            joined = ", ".join(descs)
+            suffix = "non contrainte" if len(descs) == 1 else "non contraintes"
+            out.append(f"Nœud {node_id} : {joined} {suffix}")
+        return out
+
+
+def detect_mechanisms(
+    K: csr_matrix,
+    mesh: Mesh,
+    bc: BoundaryConditions,
+    *,
+    rel_tol: float = 1e-9,
+    eigensolve: bool = False,
+) -> MechanismReport:
+    """Détecte les DDL libres sans raideur (mécanismes) à partir de K.
+
+    Analyse rapide **sans factorisation** : pour chaque DDL non bloqué par
+    Dirichlet, on inspecte le terme diagonal ``K[i, i]``.  Un DDL libre dont
+    la diagonale est nulle (relativement à l'échelle de raideur du modèle)
+    n'est connecté à aucune raideur : c'est un mécanisme ponctuel.  La
+    matrice K est alors singulière et la résolution échouera ou produira des
+    résultats absurdes.
+
+    Cas typiques détectés :
+
+    - Nœud non rattaché à un élément → tous ses DDL sont libres.
+    - DDL de rotation sur un treillis (Bar2D + ``dof_per_node=3``) : les
+      barres n'apportent aucune raideur de rotation → θz libre.
+    - Nœud relié uniquement à un élément qui n'alimente pas ce DDL.
+
+    Parameters
+    ----------
+    K : csr_matrix, shape (n_dof, n_dof)
+        Matrice de rigidité globale assemblée (avant ou après Dirichlet :
+        seuls les DDL **libres** sont analysés, donc les deux conviennent).
+    mesh : Mesh
+        Maillage (pour ``dpn``, étiquettes de DDL, indices globaux).
+    bc : BoundaryConditions
+        Conditions aux limites (les DDL Dirichlet sont exclus de l'analyse).
+    rel_tol : float
+        Seuil relatif : un DDL est jugé non contraint si
+        ``|K[i,i]| ≤ rel_tol · max|diag(K)|``.  Par défaut ``1e-9`` —
+        sépare nettement un terme nul (jamais assemblé) d'une raideur réelle.
+    eigensolve : bool
+        Si ``True``, calcule en complément la plus petite valeur propre de
+        K_free (petit ``eigsh`` sans inversion par décalage, donc sans
+        factorisation) pour détecter aussi les mécanismes globaux (corps
+        rigide) que l'analyse diagonale ne voit pas.  Échec silencieux si
+        la convergence n'est pas atteinte.
+
+    Returns
+    -------
+    MechanismReport
+        Liste des DDL non contraints et statistiques.
+
+    Examples
+    --------
+    >>> report = detect_mechanisms(K, mesh, bc)
+    >>> if report.has_mechanism:
+    ...     for msg in report.messages():
+    ...         print(msg)   # "Nœud 7 : rotation θz non contrainte"
+    """
+    dpn = mesh.dpn
+    n_dof = K.shape[0]
+    labels = _dof_labels(mesh)
+    constrained = set(_constrained_dofs(mesh, bc).keys())
+
+    diag = np.abs(K.diagonal())
+    scale = float(diag.max()) if diag.size else 0.0
+    if scale <= 0.0:
+        scale = 1.0
+    threshold = rel_tol * scale
+
+    unconstrained: list[UnconstrainedDof] = []
+    for i in range(n_dof):
+        if i in constrained or diag[i] > threshold:
+            continue
+        node_id = i // dpn
+        local_dof = i % dpn
+        lbl = labels[local_dof] if local_dof < len(labels) else f"D{local_dof}"
+        kind, desc = _DOF_DESCRIPTION.get(lbl, ("ddl", f"ddl {lbl}"))
+        unconstrained.append(UnconstrainedDof(
+            node_id=node_id,
+            local_dof=local_dof,
+            label=lbl,
+            kind=kind,
+            description=desc,
+            diagonal=float(K.diagonal()[i]),
+        ))
+
+    smallest_ev: float | None = None
+    if eigensolve:
+        smallest_ev = _smallest_free_eigenvalue(K, constrained, n_dof)
+
+    return MechanismReport(
+        unconstrained=tuple(unconstrained),
+        n_free_dofs=n_dof - len(constrained),
+        n_constrained_dofs=len(constrained),
+        smallest_eigenvalue=smallest_ev,
+    )
+
+
+def _smallest_free_eigenvalue(
+    K: csr_matrix,
+    constrained: set[int],
+    n_dof: int,
+) -> float | None:
+    """Plus petite valeur propre de K_free via un petit ``eigsh`` sans décalage.
+
+    Utilise ``which='SA'`` (sans ``sigma``), donc uniquement des produits
+    matrice-vecteur : aucune factorisation.  Renvoie ``None`` en cas de
+    non-convergence ou de système trivial.
+    """
+    from scipy.sparse.linalg import ArpackNoConvergence, eigsh
+
+    free = np.array(sorted(set(range(n_dof)) - constrained), dtype=int)
+    if free.size < 2:
+        return None
+    K_free = K[free, :][:, free].tocsr()
+    try:
+        vals = eigsh(K_free, k=1, which="SA", return_eigenvectors=False,
+                     maxiter=2000)
+        return float(vals[0])
+    except (ArpackNoConvergence, ValueError, RuntimeError):
+        return None
+
+
+def log_mechanism_report(
+    report: MechanismReport,
+    *,
+    log: logging.Logger | None = None,
+) -> None:
+    """Journalise un ``MechanismReport`` en WARNING s'il y a un mécanisme.
+
+    N'émet rien si ``report.has_mechanism`` est faux.  Ne lève jamais.
+
+    Parameters
+    ----------
+    report : MechanismReport
+        Résultat de :func:`detect_mechanisms`.
+    log : logging.Logger, optional
+        Logger cible.  Par défaut le logger ``femsolver.diagnostics``.
+    """
+    if not report.has_mechanism:
+        return
+    lg = log or logger
+    n = len(report.unconstrained)
+    lg.warning(
+        "MÉCANISME : %d ddl libre(s) sans raideur — la matrice K est "
+        "singulière, la résolution peut échouer ou donner des résultats "
+        "absurdes.", n,
+    )
+    for msg in report.messages():
+        lg.warning("  %s", msg)
+
+
+def check_constraints(
+    mesh: Mesh,
+    bc: BoundaryConditions,
+    *,
+    K: csr_matrix | None = None,
+    rel_tol: float = 1e-9,
+) -> MechanismReport:
+    """Vérifie l'absence de mécanisme avant résolution (check rapide).
+
+    Assemble la rigidité (si elle n'est pas fournie), détecte les DDL libres
+    sans raideur et journalise un avertissement clair le cas échéant.  Conçu
+    pour être appelé automatiquement avant chaque résolution.
+
+    Parameters
+    ----------
+    mesh : Mesh
+        Maillage.
+    bc : BoundaryConditions
+        Conditions aux limites.
+    K : csr_matrix, optional
+        Rigidité déjà assemblée.  Si None, elle est assemblée ici (rapide,
+        pas de factorisation).
+    rel_tol : float
+        Seuil relatif transmis à :func:`detect_mechanisms`.
+
+    Returns
+    -------
+    MechanismReport
+        Rapport de détection (jamais d'exception).
+    """
+    if K is None:
+        from femsolver.core.assembler import Assembler
+        K = Assembler(mesh).assemble_stiffness()
+    report = detect_mechanisms(K, mesh, bc, rel_tol=rel_tol)
+    log_mechanism_report(report)
+    return report

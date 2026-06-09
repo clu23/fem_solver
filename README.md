@@ -2,7 +2,7 @@
 
 Solveur éléments finis pour la mécanique des solides, écrit en Python. Couvre l'analyse statique, le flambage, la dynamique modale et transitoire, et la réponse aléatoire (PSD). Les modèles se définissent en JSON et se lancent en une commande.
 
-**881 tests · 14 types d'éléments · 7 types d'analyse · Python 3.11+**
+**892 tests · 14 types d'éléments · 7 types d'analyse · Python 3.11+**
 
 ---
 
@@ -65,6 +65,8 @@ Sept profils paramétriques utilisables pour `Beam2D`, `Beam2DTimoshenko` et `Be
 | `random_base` | Réponse PSD à une excitation de base, équation de Miles incluse |
 
 Modèles d'amortissement : Rayleigh (αM + βK), hystérétique (K·iη), modal (ξₙ par mode).
+
+**Détection de mécanismes** : avant chaque résolution, une analyse rapide de la diagonale de K (sans factorisation) repère les DDL libres dépourvus de raideur (nœud détaché, rotation oubliée…) et émet un avertissement clair — par ex. `Nœud 7 : rotation θz non contrainte` — au lieu de laisser le solveur planter ou produire des résultats absurdes.
 
 ### Post-traitement
 
@@ -218,7 +220,7 @@ Chaque fichier est exécutable directement : `python -m femsolver run examples/<
 ## Tests
 
 ```bash
-# Suite complète (881 tests, ~15 s)
+# Suite complète (892 tests, ~15 s)
 python -m pytest tests/ -v
 
 # Fichier unique
@@ -250,7 +252,7 @@ fem-solver/
 │   │   ├── boundary.py          # apply_dirichlet (élimination vraie), DirichletSystem
 │   │   ├── solver.py            # StaticSolver, ModalSolver, BucklingSolver
 │   │   ├── mpc.py               # Contraintes multi-points (élimination / Lagrange)
-│   │   └── diagnostics.py       # Conditionnement, détection de singularités
+│   │   └── diagnostics.py       # Masse/réactions/équilibre + détection de mécanismes
 │   ├── elements/
 │   │   ├── bar2d.py             # axial_force, geometric_stiffness_matrix
 │   │   ├── beam2d.py            # Euler-Bernoulli, section obj. ou scalaires
@@ -279,7 +281,7 @@ fem-solver/
 │       ├── plotter3d.py         # PyVista
 │       ├── beam_diagrams.py     # diagrammes d'efforts internes M/V/N (poutres)
 │       └── error_estimator.py   # indicateur ZZ par élément
-├── tests/                       # 31 fichiers, 881 tests
+├── tests/                       # 31 fichiers, 892 tests
 ├── examples/                    # 12 modèles JSON + scripts Python annotés
 ├── docs/
 │   └── json_schema.md           # Schéma JSON complet avec exemples

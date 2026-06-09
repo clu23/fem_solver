@@ -39,9 +39,11 @@ from femsolver.core.assembler import Assembler
 from femsolver.core.boundary import apply_dirichlet
 from femsolver.core.diagnostics import (
     DiagnosticsResult,
+    check_constraints,
     check_equilibrium,
     check_mass,
     compute_reactions,
+    detect_mechanisms,
     run_diagnostics,
 )
 from femsolver.core.material import ElasticMaterial
@@ -465,3 +467,219 @@ class TestRunDiagnostics:
         mesh, K, M, F, bc, u = warren_truss
         result = run_diagnostics(mesh, K, u, F, bc)
         assert result.equilibrium_residuals.shape == (mesh.n_dim,)
+
+
+# ---------------------------------------------------------------------------
+# Détection de mécanismes (DDL libres sans raideur)
+# ---------------------------------------------------------------------------
+
+
+_STEEL = ElasticMaterial(E=210e9, nu=0.3, rho=7800.0)
+
+
+def _assemble(mesh: Mesh):
+    """Assemble K et renvoie la matrice de rigidité globale."""
+    return Assembler(mesh).assemble_stiffness()
+
+
+class TestDetectMechanisms:
+    """Cas volontairement mal contraints — la singularité doit être détectée."""
+
+    def test_well_constrained_beam_no_mechanism(self):
+        """Console Beam2D correctement encastrée : aucun mécanisme."""
+        nodes = np.array([[0.0, 0.0], [1.0, 0.0]])
+        elems = [ElementData(Beam2D, (0, 1), _STEEL,
+                             {"area": 1e-4, "inertia": 8.33e-6})]
+        mesh = Mesh(nodes=nodes, elements=elems, n_dim=2, dof_per_node=3)
+        bc = BoundaryConditions(dirichlet={0: {0: 0.0, 1: 0.0, 2: 0.0}},
+                                neumann={})
+        report = detect_mechanisms(_assemble(mesh), mesh, bc)
+        assert not report.has_mechanism
+        assert report.unconstrained == ()
+
+    def test_free_node_flags_all_its_dofs(self):
+        """Un nœud détaché (aucun élément) → tous ses DDL sont libres."""
+        # Nœud 2 n'appartient à aucun élément.
+        nodes = np.array([[0.0, 0.0], [1.0, 0.0], [5.0, 5.0]])
+        elems = [ElementData(Bar2D, (0, 1), _STEEL, {"area": 1e-4})]
+        mesh = Mesh(nodes=nodes, elements=elems, n_dim=2)
+        # Nœud 0 fixé, nœud 1 : uy bloqué (l'axial de la barre tient ux).
+        bc = BoundaryConditions(dirichlet={0: {0: 0.0, 1: 0.0}, 1: {1: 0.0}},
+                                neumann={})
+        report = detect_mechanisms(_assemble(mesh), mesh, bc)
+        assert report.has_mechanism
+        flagged = {(u.node_id, u.label) for u in report.unconstrained}
+        assert flagged == {(2, "UX"), (2, "UY")}
+        # Message groupé par nœud.
+        assert report.messages() == [
+            "Nœud 2 : translation ux, translation uy non contraintes"
+        ]
+
+    def test_missing_rotation_on_beam_node(self):
+        """Rotation θz non contrainte : nœud d'un modèle poutre sans raideur.
+
+        Modèle Beam2D (3 DDL/nœud) avec un nœud 2 détaché.  Ses translations
+        sont bloquées par Dirichlet, mais sa rotation θz est oubliée : aucune
+        poutre n'y apporte de raideur → mécanisme de rotation.  Reproduit le
+        warning « Nœud N : rotation θz non contrainte ».
+        """
+        nodes = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+        elems = [ElementData(Beam2D, (0, 1), _STEEL,
+                             {"area": 1e-4, "inertia": 8.33e-6})]
+        mesh = Mesh(nodes=nodes, elements=elems, n_dim=2, dof_per_node=3)
+        # Nœud 0 encastré ; nœud 2 détaché, translations bloquées, θz oubliée.
+        bc = BoundaryConditions(
+            dirichlet={0: {0: 0.0, 1: 0.0, 2: 0.0}, 2: {0: 0.0, 1: 0.0}},
+            neumann={},
+        )
+        report = detect_mechanisms(_assemble(mesh), mesh, bc)
+        assert report.has_mechanism
+        assert len(report.unconstrained) == 1
+        dof = report.unconstrained[0]
+        assert dof.node_id == 2
+        assert dof.label == "THZ"
+        assert dof.kind == "rotation"
+        assert report.messages() == ["Nœud 2 : rotation θz non contrainte"]
+
+    def test_rotation_label_from_synthetic_K(self):
+        """Identification d'une rotation θz sur une K synthétique (3D θx aussi)."""
+        import scipy.sparse as sp
+        # Maillage Beam3D factice (6 DDL/nœud) pour les étiquettes.
+        from femsolver.elements.beam3d import Beam3D
+        from femsolver.core.sections import RectangularSection
+        sec = RectangularSection(width=0.05, height=0.05)
+        nodes = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+        elems = [ElementData(Beam3D, (0, 1), _STEEL, {"section": sec})]
+        mesh = Mesh(nodes=nodes, elements=elems, n_dim=3, dof_per_node=6)
+        diag = np.full(12, 1e6)
+        diag[9] = 0.0   # nœud 1, DDL local 3 → THX
+        K = sp.diags(diag).tocsr()
+        bc = BoundaryConditions(dirichlet={0: {d: 0.0 for d in range(6)}},
+                                neumann={})
+        report = detect_mechanisms(K, mesh, bc)
+        assert [u.label for u in report.unconstrained] == ["THX"]
+        assert report.messages() == ["Nœud 1 : rotation θx non contrainte"]
+
+    def test_diagonal_value_is_zero(self):
+        """Le DDL signalé a bien une diagonale nulle."""
+        nodes = np.array([[0.0, 0.0], [1.0, 0.0], [5.0, 5.0]])
+        elems = [ElementData(Bar2D, (0, 1), _STEEL, {"area": 1e-4})]
+        mesh = Mesh(nodes=nodes, elements=elems, n_dim=2)  # nœud 2 détaché
+        bc = BoundaryConditions(dirichlet={0: {0: 0.0, 1: 0.0}, 1: {1: 0.0}},
+                                neumann={})
+        report = detect_mechanisms(_assemble(mesh), mesh, bc)
+        assert report.has_mechanism
+        for dof in report.unconstrained:
+            assert abs(dof.diagonal) < 1e-6
+
+    def test_constrained_dof_not_flagged(self):
+        """Un DDL bloqué par Dirichlet n'est jamais signalé, même sans raideur."""
+        nodes = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+        elems = [ElementData(Beam2D, (0, 1), _STEEL,
+                             {"area": 1e-4, "inertia": 8.33e-6})]
+        mesh = Mesh(nodes=nodes, elements=elems, n_dim=2, dof_per_node=3)
+        # Nœud 2 détaché mais TOUS ses DDL (y compris θz) sont bloqués.
+        bc = BoundaryConditions(
+            dirichlet={0: {0: 0.0, 1: 0.0, 2: 0.0}, 2: {0: 0.0, 1: 0.0, 2: 0.0}},
+            neumann={},
+        )
+        report = detect_mechanisms(_assemble(mesh), mesh, bc)
+        assert not report.has_mechanism
+
+    def test_report_counts(self):
+        """Les compteurs DDL libres / contraints sont cohérents."""
+        nodes = np.array([[0.0, 0.0], [1.0, 0.0]])
+        elems = [ElementData(Bar2D, (0, 1), _STEEL, {"area": 1e-4})]
+        mesh = Mesh(nodes=nodes, elements=elems, n_dim=2)  # dpn=2 → 4 DDL
+        bc = BoundaryConditions(dirichlet={0: {0: 0.0, 1: 0.0}}, neumann={})
+        report = detect_mechanisms(_assemble(mesh), mesh, bc)
+        assert report.n_constrained_dofs == 2
+        assert report.n_free_dofs == 2
+
+    def test_eigensolve_detects_near_zero_mode(self):
+        """Avec eigensolve, K_free singulière → plus petite valeur propre ≈ 0."""
+        nodes = np.array([[0.0, 0.0], [1.0, 0.0], [5.0, 5.0]])
+        elems = [ElementData(Bar2D, (0, 1), _STEEL, {"area": 1e-4})]
+        mesh = Mesh(nodes=nodes, elements=elems, n_dim=2)
+        bc = BoundaryConditions(dirichlet={0: {0: 0.0, 1: 0.0}, 1: {1: 0.0}},
+                                neumann={})
+        report = detect_mechanisms(_assemble(mesh), mesh, bc, eigensolve=True)
+        assert report.smallest_eigenvalue is not None
+        # Le mode du nœud détaché donne une valeur propre quasi nulle.
+        assert abs(report.smallest_eigenvalue) < 1.0
+
+
+class TestCheckConstraintsIntegration:
+    """check_constraints assemble, détecte et journalise le warning."""
+
+    def test_check_constraints_logs_warning(self, caplog):
+        """check_constraints émet un WARNING clair pour θz non contrainte."""
+        nodes = np.array([[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]])
+        elems = [ElementData(Beam2D, (0, 1), _STEEL,
+                             {"area": 1e-4, "inertia": 8.33e-6})]
+        mesh = Mesh(nodes=nodes, elements=elems, n_dim=2, dof_per_node=3)
+        bc = BoundaryConditions(
+            dirichlet={0: {0: 0.0, 1: 0.0, 2: 0.0}, 2: {0: 0.0, 1: 0.0}},
+            neumann={},
+        )
+        with caplog.at_level(logging.WARNING, logger="femsolver.diagnostics"):
+            report = check_constraints(mesh, bc)
+        assert report.has_mechanism
+        text = "\n".join(r.getMessage() for r in caplog.records)
+        assert "Nœud 2 : rotation θz non contrainte" in text
+        assert "MÉCANISME" in text
+
+    def test_check_constraints_silent_when_ok(self, caplog):
+        """Modèle bien contraint : aucun WARNING émis."""
+        nodes = np.array([[0.0, 0.0], [1.0, 0.0]])
+        elems = [ElementData(Beam2D, (0, 1), _STEEL,
+                             {"area": 1e-4, "inertia": 8.33e-6})]
+        mesh = Mesh(nodes=nodes, elements=elems, n_dim=2, dof_per_node=3)
+        bc = BoundaryConditions(dirichlet={0: {0: 0.0, 1: 0.0, 2: 0.0}},
+                                neumann={})
+        with caplog.at_level(logging.WARNING, logger="femsolver.diagnostics"):
+            report = check_constraints(mesh, bc)
+        assert not report.has_mechanism
+        assert caplog.records == []
+
+    def test_solve_model_runs_check_automatically(self, caplog, tmp_path):
+        """solve_model déclenche la détection avant la résolution."""
+        import json as _json
+
+        from femsolver.io.json_model import load_model, solve_model
+
+        # Treillis Bar2D avec DDL de rotation parasites (dof_per_node implicite
+        # via la longueur du vecteur n'existe pas ici : on force le cas en
+        # laissant un nœud totalement libre, statiquement singulier).
+        model_dict = {
+            "name": "Mécanisme volontaire",
+            "materials": {"steel": {"E": 210e9, "nu": 0.3, "rho": 7800}},
+            "nodes": [[0.0, 0.0], [1.0, 0.0], [2.0, 0.0]],
+            "elements": [
+                {"type": "Bar2D", "nodes": [0, 1], "material": "steel",
+                 "area": 1e-4}
+            ],
+            "boundary_conditions": {
+                "dirichlet": [
+                    {"node": 0, "dof": 0, "value": 0.0},
+                    {"node": 0, "dof": 1, "value": 0.0},
+                    {"node": 1, "dof": 1, "value": 0.0},
+                ],
+                "neumann": [],
+            },
+            "analysis": {"type": "static"},
+        }
+        path = tmp_path / "mechanism.json"
+        path.write_text(_json.dumps(model_dict), encoding="utf-8")
+        model = load_model(path)
+
+        with caplog.at_level(logging.WARNING, logger="femsolver.diagnostics"):
+            try:
+                solve_model(model, verbose=False)
+            except Exception:
+                # La résolution peut échouer (K singulière) — le warning
+                # a déjà été émis avant, c'est tout ce qui compte ici.
+                pass
+        text = "\n".join(r.getMessage() for r in caplog.records)
+        assert "MÉCANISME" in text
+        assert "Nœud 2" in text
