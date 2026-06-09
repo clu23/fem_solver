@@ -33,8 +33,8 @@ import numpy as np
 
 from femsolver.core.assembler import Assembler
 from femsolver.core.boundary import apply_dirichlet
-from femsolver.core.diagnostics import check_constraints
 from femsolver.core.material import ElasticMaterial
+from femsolver.core.model_check import run_model_checks
 from femsolver.core.mesh import (
     BodyForce,
     BoundaryConditions,
@@ -677,9 +677,11 @@ def solve_model(model: FEModel, *, verbose: bool = True) -> dict[str, Any]:
         logger.info("Modèle '%s' chargé — %d nœuds, %d éléments, analyse '%s'",
                     model.name, mesh.n_nodes, len(mesh.elements), atype)
 
-    # Détection de mécanismes avant résolution : signale les DDL libres sans
-    # raideur (nœud détaché, rotation manquante…) qui rendraient K singulière.
-    check_constraints(mesh, bc)
+    # Vérification de santé du modèle avant résolution (style Abaqus) :
+    # erreurs bloquantes (orphelins, Jacobien, singularité) → ModelError ;
+    # avertissements (nœuds coïncidents, doublons, qualité, conditionnement)
+    # loggés, le calcul continue.
+    run_model_checks(mesh, bc, analysis_type=atype).raise_if_errors()
 
     results = _dispatch_analysis(mesh, bc, analysis, atype, verbose=verbose)
     results["name"] = model.name

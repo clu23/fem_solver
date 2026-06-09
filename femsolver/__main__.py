@@ -5,6 +5,7 @@ Usage
     python -m femsolver run      model.json [--detailed] [--export out.vtu]
                                             [--diagrams out.png] [--quiet]
     python -m femsolver validate model.json
+    python -m femsolver check    model.json
     python -m femsolver info     model.json
 
 Commandes
@@ -13,11 +14,17 @@ run
     Charge le modèle JSON, lance le calcul et affiche un résumé des résultats.
     Pour les analyses statiques, affiche les 5 nœuds les plus déplacés,
     les réactions d'appui, le bilan d'équilibre, et pour les treillis les
-    barres les plus sollicitées en traction/compression.
+    barres les plus sollicitées en traction/compression.  La santé du modèle
+    est vérifiée automatiquement avant la résolution (cf. ``check``).
 
 validate
     Vérifie que le JSON est syntaxiquement correct et que le modèle peut être
     construit (types d'éléments, matériaux, sections…), sans lancer aucun calcul.
+
+check
+    Vérifie la santé du modèle (style Abaqus) : nœuds orphelins, Jacobien
+    négatif/nul, singularité après BCs (erreurs bloquantes) ; nœuds coïncidents,
+    éléments dupliqués, mauvaise qualité, conditionnement (avertissements).
 
 info
     Affiche un résumé du modèle : nœuds, éléments, DDL, conditions aux limites
@@ -423,6 +430,70 @@ def cmd_validate(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Sous-commande : check
+# ---------------------------------------------------------------------------
+
+def cmd_check(args: argparse.Namespace) -> int:
+    """Vérifie la santé du modèle (orphelins, Jacobien, singularité, qualité…).
+
+    Contrairement à ``validate`` (qui ne contrôle que le JSON), ``check``
+    exécute toutes les vérifications de :func:`run_model_checks` et affiche
+    erreurs bloquantes et avertissements.  Retourne 1 si au moins une erreur.
+    """
+    import logging
+
+    path = Path(args.path)
+    try:
+        from femsolver.io.json_model import load_model
+        model = load_model(path)
+    except FileNotFoundError:
+        _err(f"Fichier introuvable : {path}")
+        return 1
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
+        _err(f"Erreur de chargement : {exc}")
+        return 1
+
+    from femsolver.core.model_check import run_model_checks
+
+    atype = model.analysis.get("type", "static")
+
+    # On affiche le rapport nous-mêmes : on coupe le logging interne pour
+    # éviter le double affichage des avertissements.
+    mc_logger = logging.getLogger("femsolver.model_check")
+    prev_level = mc_logger.level
+    mc_logger.setLevel(logging.CRITICAL)
+    try:
+        report = run_model_checks(model.mesh, model.bc, analysis_type=atype)
+    finally:
+        mc_logger.setLevel(prev_level)
+
+    _header(f"VÉRIFICATION DU MODÈLE : {model.name}")
+    _row("Nœuds", model.mesh.n_nodes)
+    _row("Éléments", len(model.mesh.elements))
+    _row("Type d'analyse", atype)
+
+    if report.errors:
+        _section(f"Erreurs bloquantes ({len(report.errors)})")
+        for e in report.errors:
+            _err(f"[{e.code}] {e.message}")
+    if report.warnings:
+        _section(f"Avertissements ({len(report.warnings)})")
+        for w in report.warnings:
+            _warn(f"[{w.code}] {w.message}")
+
+    print()
+    if report.errors:
+        _err(f"Modèle NON valide — {len(report.errors)} erreur(s), "
+             f"{len(report.warnings)} avertissement(s). Corrigez avant de résoudre.")
+        return 1
+    if report.warnings:
+        _warn(f"Modèle résoluble avec {len(report.warnings)} avertissement(s).")
+    else:
+        _ok("Modèle sain — aucune erreur, aucun avertissement.")
+    return 0
+
+
+# ---------------------------------------------------------------------------
 # Sous-commande : info
 # ---------------------------------------------------------------------------
 
@@ -517,11 +588,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         diagrams = f"{path.stem}_diagrams.png"
 
     try:
+        from femsolver.core.model_check import ModelError
         from femsolver.io.json_model import load_model, solve_model
         model = load_model(path)
         results = solve_model(model, verbose=False)
     except FileNotFoundError:
         _err(f"Fichier introuvable : {path}")
+        return 1
+    except ModelError as exc:
+        _err(f"Modèle invalide — résolution annulée :\n{exc}")
+        _warn("Lancez « python -m femsolver check » pour le diagnostic complet.")
         return 1
     except (ValueError, KeyError, TypeError, json.JSONDecodeError) as exc:
         _err(f"Erreur de chargement : {exc}")
@@ -618,6 +694,7 @@ def _build_parser() -> argparse.ArgumentParser:
         epilog=textwrap.dedent("""\
             Exemples :
               python -m femsolver validate examples/warren_truss.json
+              python -m femsolver check    examples/warren_truss.json
               python -m femsolver info     examples/cantilever_beam.json
               python -m femsolver run      examples/warren_truss.json
               python -m femsolver run      examples/cantilever_beam.json --detailed
@@ -636,6 +713,13 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Vérifier le JSON sans lancer le calcul.",
     )
     p_val.add_argument("path", metavar="model.json")
+
+    # check
+    p_chk = sub.add_parser(
+        "check",
+        help="Vérifier la santé du modèle (orphelins, Jacobien, singularité…).",
+    )
+    p_chk.add_argument("path", metavar="model.json")
 
     # info
     p_info = sub.add_parser(
@@ -695,7 +779,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = _build_parser()
     args = parser.parse_args(argv)
 
-    dispatch = {"validate": cmd_validate, "info": cmd_info, "run": cmd_run}
+    dispatch = {"validate": cmd_validate, "check": cmd_check,
+                "info": cmd_info, "run": cmd_run}
     return dispatch[args.command](args)
 
 

@@ -154,6 +154,55 @@ class TestValidate:
 
 
 # ---------------------------------------------------------------------------
+# Tests — check
+# ---------------------------------------------------------------------------
+
+
+class TestCheck:
+    """Vérifie la commande check (santé du modèle, distincte de validate)."""
+
+    def test_clean_model_returns_0(self, tmp_path, capsys):
+        p = _make_json(tmp_path, STATIC_DATA)
+        rc, out, _ = _run(["check", str(p)], capsys)
+        assert rc == 0
+        assert "sain" in out.lower() or "✓" in out
+
+    def test_orphan_node_returns_1(self, tmp_path, capsys):
+        # Ajoute un nœud orphelin (indice 2, non référencé).
+        data = {**STATIC_DATA, "nodes": [[0.0, 0.0], [1.0, 0.0], [5.0, 5.0]]}
+        p = _make_json(tmp_path, data)
+        rc, out, err = _run(["check", str(p)], capsys)
+        assert rc == 1
+        combined = (out + err).lower()
+        assert "orphelin" in combined
+
+    def test_singular_model_returns_1_with_dof(self, tmp_path, capsys):
+        # Une seule barre horizontale : nœud 1 libre en y → mécanisme.
+        data = {
+            "name": "Singulier",
+            "materials": {"mat": {"E": 210e9, "nu": 0.3, "rho": 7800}},
+            "nodes": [[0.0, 0.0], [1.0, 0.0]],
+            "elements": [
+                {"type": "Bar2D", "nodes": [0, 1], "material": "mat", "area": 1e-4}
+            ],
+            "boundary_conditions": {
+                "dirichlet": [{"node": 0, "dof": 0}, {"node": 0, "dof": 1}],
+                "neumann": [{"node": 1, "dof": 0, "value": 1000.0}],
+            },
+            "analysis": {"type": "static"},
+        }
+        p = _make_json(tmp_path, data)
+        rc, out, err = _run(["check", str(p)], capsys)
+        assert rc == 1
+        combined = out + err
+        assert "Nœud" in combined and "singul" in combined.lower()
+
+    def test_file_not_found_returns_1(self, capsys):
+        rc, _, err = _run(["check", "nope.json"], capsys)
+        assert rc == 1
+
+
+# ---------------------------------------------------------------------------
 # Tests — info
 # ---------------------------------------------------------------------------
 

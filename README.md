@@ -2,7 +2,7 @@
 
 Solveur éléments finis pour la mécanique des solides, écrit en Python. Couvre l'analyse statique, le flambage, la dynamique modale et transitoire, et la réponse aléatoire (PSD). Les modèles se définissent en JSON et se lancent en une commande.
 
-**892 tests · 14 types d'éléments · 7 types d'analyse · Python 3.11+**
+**917 tests · 14 types d'éléments · 7 types d'analyse · Python 3.11+**
 
 ---
 
@@ -66,7 +66,12 @@ Sept profils paramétriques utilisables pour `Beam2D`, `Beam2DTimoshenko` et `Be
 
 Modèles d'amortissement : Rayleigh (αM + βK), hystérétique (K·iη), modal (ξₙ par mode).
 
-**Détection de mécanismes** : avant chaque résolution, une analyse rapide de la diagonale de K (sans factorisation) repère les DDL libres dépourvus de raideur (nœud détaché, rotation oubliée…) et émet un avertissement clair — par ex. `Nœud 7 : rotation θz non contrainte` — au lieu de laisser le solveur planter ou produire des résultats absurdes.
+**Vérification du modèle avant résolution** (style Abaqus : vérifier, avertir, bloquer si grave). Avant chaque résolution, `run_model_checks` détecte les défauts de modélisation :
+
+- *Erreurs bloquantes* (lèvent `ModelError`) : nœuds orphelins, Jacobien négatif/nul aux points de Gauss (élément retourné/dégénéré), singularité après BCs (factorisation LDLᵀ de K_free, avec identification du DDL — par ex. `Nœud 7 (rotation θz)`).
+- *Avertissements* (loggés, le calcul continue) : nœuds coïncidents, éléments dupliqués, qualité (aspect ratio > 10, angles < 10° ou > 170°), conditionnement de K > 10¹².
+
+Pas d'AUTOSPC, pas de correction automatique — on bloque ou on avertit, c'est à l'utilisateur de corriger.
 
 ### Post-traitement
 
@@ -83,10 +88,12 @@ Modèles d'amortissement : Rayleigh (αM + βK), hystérétique (K·iη), modal 
 python -m femsolver run      model.json [--detailed] [--export out.vtu]
                                          [--diagrams out.png] [--quiet]
 python -m femsolver validate model.json
+python -m femsolver check    model.json
 python -m femsolver info     model.json
 ```
 
 - **`validate`** — vérifie la syntaxe JSON, les types d'éléments, les matériaux et les sections sans aucun calcul ; signale un système potentiellement singulier ou un modèle sans chargement
+- **`check`** — vérifie la **santé du modèle** (style Abaqus) : nœuds orphelins, Jacobien négatif/nul, singularité après BCs (erreurs bloquantes) ; nœuds coïncidents, éléments dupliqués, mauvaise qualité, conditionnement (avertissements). Ces contrôles tournent aussi automatiquement avant chaque résolution
 - **`info`** — affiche nœuds, DDL, éléments, matériaux distincts, conditions aux limites et paramètres d'analyse
 - **`run`** — résout et affiche les résultats ; pour les analyses statiques : top-5 nœuds les plus déplacés avec coordonnées, réactions d'appui, bilan d'équilibre global, et efforts de barre top-5 traction/compression (treillis uniquement)
 - **`--detailed`** — tableau complet nœud par nœud avec toutes les composantes DDL
@@ -220,7 +227,7 @@ Chaque fichier est exécutable directement : `python -m femsolver run examples/<
 ## Tests
 
 ```bash
-# Suite complète (892 tests, ~15 s)
+# Suite complète (917 tests, ~15 s)
 python -m pytest tests/ -v
 
 # Fichier unique
@@ -252,7 +259,8 @@ fem-solver/
 │   │   ├── boundary.py          # apply_dirichlet (élimination vraie), DirichletSystem
 │   │   ├── solver.py            # StaticSolver, ModalSolver, BucklingSolver
 │   │   ├── mpc.py               # Contraintes multi-points (élimination / Lagrange)
-│   │   └── diagnostics.py       # Masse/réactions/équilibre + détection de mécanismes
+│   │   ├── diagnostics.py       # Masse/réactions/équilibre + détection de mécanismes
+│   │   └── model_check.py       # Santé du modèle pré-résolution (orphelins, J, singularité…)
 │   ├── elements/
 │   │   ├── bar2d.py             # axial_force, geometric_stiffness_matrix
 │   │   ├── beam2d.py            # Euler-Bernoulli, section obj. ou scalaires
@@ -281,7 +289,7 @@ fem-solver/
 │       ├── plotter3d.py         # PyVista
 │       ├── beam_diagrams.py     # diagrammes d'efforts internes M/V/N (poutres)
 │       └── error_estimator.py   # indicateur ZZ par élément
-├── tests/                       # 31 fichiers, 892 tests
+├── tests/                       # 32 fichiers, 917 tests
 ├── examples/                    # 12 modèles JSON + scripts Python annotés
 ├── docs/
 │   └── json_schema.md           # Schéma JSON complet avec exemples

@@ -642,15 +642,19 @@ class TestCheckConstraintsIntegration:
         assert not report.has_mechanism
         assert caplog.records == []
 
-    def test_solve_model_runs_check_automatically(self, caplog, tmp_path):
-        """solve_model déclenche la détection avant la résolution."""
+    def test_solve_model_blocks_on_singular_model(self, tmp_path):
+        """solve_model lève ModelError (via run_model_checks) avant de résoudre.
+
+        Le nœud 2 est orphelin (aucun élément ne le référence) → erreur
+        bloquante détectée par la vérification automatique de santé du modèle.
+        """
         import json as _json
 
+        import pytest
+
+        from femsolver.core.model_check import ModelError
         from femsolver.io.json_model import load_model, solve_model
 
-        # Treillis Bar2D avec DDL de rotation parasites (dof_per_node implicite
-        # via la longueur du vecteur n'existe pas ici : on force le cas en
-        # laissant un nœud totalement libre, statiquement singulier).
         model_dict = {
             "name": "Mécanisme volontaire",
             "materials": {"steel": {"E": 210e9, "nu": 0.3, "rho": 7800}},
@@ -673,13 +677,5 @@ class TestCheckConstraintsIntegration:
         path.write_text(_json.dumps(model_dict), encoding="utf-8")
         model = load_model(path)
 
-        with caplog.at_level(logging.WARNING, logger="femsolver.diagnostics"):
-            try:
-                solve_model(model, verbose=False)
-            except Exception:
-                # La résolution peut échouer (K singulière) — le warning
-                # a déjà été émis avant, c'est tout ce qui compte ici.
-                pass
-        text = "\n".join(r.getMessage() for r in caplog.records)
-        assert "MÉCANISME" in text
-        assert "Nœud 2" in text
+        with pytest.raises(ModelError, match="orphelin"):
+            solve_model(model, verbose=False)
