@@ -2,7 +2,8 @@
 
 Usage
 -----
-    python -m femsolver run      model.json [--detailed] [--export out.vtu] [--quiet]
+    python -m femsolver run      model.json [--detailed] [--export out.vtu]
+                                            [--diagrams out.png] [--quiet]
     python -m femsolver validate model.json
     python -m femsolver info     model.json
 
@@ -330,6 +331,55 @@ def _export_vtu(export_path: str, model: Any, results: dict, *, quiet: bool = Fa
 
 
 # ---------------------------------------------------------------------------
+# Diagrammes d'efforts internes (poutres)
+# ---------------------------------------------------------------------------
+
+def _plot_diagrams(
+    diagrams_path: str,
+    model: Any,
+    results: dict,
+    *,
+    quiet: bool = False,
+) -> None:
+    """Trace les diagrammes d'efforts internes M/V/N des poutres.
+
+    Parameters
+    ----------
+    diagrams_path : str
+        Chemin de sortie PNG (déjà résolu par l'appelant).
+    model : FEModel
+    results : dict
+        Résultats retournés par ``solve_model`` (doit contenir ``"u"``).
+    quiet : bool
+    """
+    atype = results.get("analysis_type", "static")
+    if atype != "static" or "u" not in results:
+        _warn("--diagrams n'est disponible que pour l'analyse statique.")
+        return
+
+    from femsolver.postprocess.beam_diagrams import (
+        extract_beam_diagrams,
+        plot_beam_diagrams,
+    )
+
+    u_full = np.array(results["u"])
+    diagrams = extract_beam_diagrams(model.mesh, model.bc, u_full)
+    if not diagrams:
+        _warn("Aucun élément poutre dans le modèle — pas de diagramme.")
+        return
+
+    try:
+        plot_beam_diagrams(
+            diagrams, title=model.name, show=False, savefig=diagrams_path
+        )
+        if not quiet:
+            _ok(f"Diagrammes M/V/N → {diagrams_path}  "
+                f"({len(diagrams)} élément(s) poutre)")
+    except (ValueError, ImportError) as exc:
+        _err(f"Tracé des diagrammes échoué : {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Sous-commande : validate
 # ---------------------------------------------------------------------------
 
@@ -462,6 +512,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     path = Path(args.path)
     detailed = getattr(args, "detailed", False)
     export   = getattr(args, "export", None)
+    diagrams = getattr(args, "diagrams", None)
+    if diagrams == "<auto>":
+        diagrams = f"{path.stem}_diagrams.png"
 
     try:
         from femsolver.io.json_model import load_model, solve_model
@@ -489,6 +542,9 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     if export:
         _export_vtu(export, model, results, quiet=args.quiet)
+
+    if diagrams:
+        _plot_diagrams(diagrams, model, results, quiet=args.quiet)
 
     return 0
 
@@ -566,6 +622,7 @@ def _build_parser() -> argparse.ArgumentParser:
               python -m femsolver run      examples/warren_truss.json
               python -m femsolver run      examples/cantilever_beam.json --detailed
               python -m femsolver run      examples/warren_truss.json --export warren.vtu
+              python -m femsolver run      examples/cantilever_distributed_beam.json --diagrams
               python -m femsolver run      examples/cantilever_modal.json --quiet
         """),
     )
@@ -608,6 +665,15 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="FILE.vtu",
         default=None,
         help="Exporter les résultats en VTK (ParaView) sans affichage superflu.",
+    )
+    p_run.add_argument(
+        "--diagrams",
+        metavar="FILE.png",
+        nargs="?",
+        const="<auto>",
+        default=None,
+        help="Tracer les diagrammes d'efforts internes M/V/N des poutres "
+             "(analyse statique). Sans valeur, enregistre <modèle>_diagrams.png.",
     )
 
     return parser

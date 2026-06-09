@@ -2,7 +2,7 @@
 
 Solveur éléments finis pour la mécanique des solides, écrit en Python. Couvre l'analyse statique, le flambage, la dynamique modale et transitoire, et la réponse aléatoire (PSD). Les modèles se définissent en JSON et se lancent en une commande.
 
-**857 tests · 14 types d'éléments · 7 types d'analyse · Python 3.11+**
+**881 tests · 14 types d'éléments · 7 types d'analyse · Python 3.11+**
 
 ---
 
@@ -70,6 +70,7 @@ Modèles d'amortissement : Rayleigh (αM + βK), hystérétique (K·iη), modal 
 
 - Contraintes et déformations aux points de Gauss, lissage nodal (moyenne pondérée)
 - Contrainte de Von Mises 2D et 3D
+- Diagrammes d'efforts internes M/V/N (et torsion T en 3D) pour les poutres, récupérés par équilibre (moment parabolique / tranchant linéaire exacts sous charge répartie)
 - Export VTU (ParaView) : déplacements, contraintes, Von Mises — tous types d'éléments
 - Visualisation 2D (Matplotlib) et 3D (PyVista)
 - Estimateur d'erreur par élément pour piloter le raffinement de maillage
@@ -77,7 +78,8 @@ Modèles d'amortissement : Rayleigh (αM + βK), hystérétique (K·iη), modal 
 ### Interface en ligne de commande
 
 ```
-python -m femsolver run      model.json [--detailed] [--export out.vtu] [--quiet]
+python -m femsolver run      model.json [--detailed] [--export out.vtu]
+                                         [--diagrams out.png] [--quiet]
 python -m femsolver validate model.json
 python -m femsolver info     model.json
 ```
@@ -87,6 +89,7 @@ python -m femsolver info     model.json
 - **`run`** — résout et affiche les résultats ; pour les analyses statiques : top-5 nœuds les plus déplacés avec coordonnées, réactions d'appui, bilan d'équilibre global, et efforts de barre top-5 traction/compression (treillis uniquement)
 - **`--detailed`** — tableau complet nœud par nœud avec toutes les composantes DDL
 - **`--export out.vtu`** — écrit le champ de déplacement dans un fichier VTU sans encombrer le terminal
+- **`--diagrams [out.png]`** — trace les diagrammes d'efforts internes M/V/N des poutres (analyse statique) ; sans valeur, enregistre `<modèle>_diagrams.png`
 
 ### API Python
 
@@ -199,6 +202,7 @@ Chaque fichier est exécutable directement : `python -m femsolver run examples/<
 |---------|---------|-------------|
 | `warren_truss.json` | Statique | Treillis Warren 9 nœuds × 15 Bar2D, charge centrale 10 kN. Réactions, bilan d'équilibre, efforts de barre top-5. |
 | `cantilever_beam.json` | Statique | Console Beam2D 6 nœuds, F=−5 kN en bout. Résultat exact : δ = PL³/(3EI) = −1.905 mm à rtol=1×10⁻¹⁰. |
+| `cantilever_distributed_beam.json` | Statique | Console Beam2D 4 éléments, charge répartie q=−8 kN/m. Diagrammes `--diagrams` : V linéaire (\|V\|max=q·L=16 kN), M parabolique (\|M\|max=q·L²/2=16 kN·m), exacts. |
 | `cantilever_modal.json` | Modale | Console 11 nœuds, 3 modes. f₁=83.8 Hz, f₂=525 Hz — comparaison avec les βₙL d'Euler-Bernoulli. |
 | `euler_column_buckling.json` | Flambage | Colonne encastrée-libre 20 Beam2D, P_ref=1 N. λ_cr=431.80 contre P_cr=431.80 N analytique (err < 0.01 %). |
 | `plate_hole_quad4.json` | Statique | Quart de plaque trouée, maillage polaire 12 Quad4, σ_y=1 MPa. Concentration de contraintes → Kt=3 de Kirsch au raffinement. |
@@ -214,7 +218,7 @@ Chaque fichier est exécutable directement : `python -m femsolver run examples/<
 ## Tests
 
 ```bash
-# Suite complète (828 tests, ~15 s)
+# Suite complète (881 tests, ~15 s)
 python -m pytest tests/ -v
 
 # Fichier unique
@@ -273,9 +277,10 @@ fem-solver/
 │       ├── stress3d.py          # contraintes 3D
 │       ├── plotter2d.py         # Matplotlib
 │       ├── plotter3d.py         # PyVista
+│       ├── beam_diagrams.py     # diagrammes d'efforts internes M/V/N (poutres)
 │       └── error_estimator.py   # indicateur ZZ par élément
-├── tests/                       # 30 fichiers, 828 tests
-├── examples/                    # 9 modèles JSON + scripts Python annotés
+├── tests/                       # 31 fichiers, 881 tests
+├── examples/                    # 12 modèles JSON + scripts Python annotés
 ├── docs/
 │   └── json_schema.md           # Schéma JSON complet avec exemples
 ├── SPECS.md                     # Spécifications techniques détaillées

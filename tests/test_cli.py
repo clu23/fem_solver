@@ -309,6 +309,33 @@ class TestRun:
         assert rc == 0
         assert vtu.exists()
 
+    def test_diagrams_creates_png(self, tmp_path, capsys):
+        """--diagrams crée un fichier PNG pour une poutre Beam2D."""
+        p = _make_json(tmp_path, CANTILEVER_JSON_DATA)
+        png = tmp_path / "diag.png"
+        rc, out, _ = _run(["run", str(p), "--diagrams", str(png)], capsys)
+        assert rc == 0
+        assert png.exists()
+        assert "M/V/N" in out
+
+    def test_diagrams_quiet_still_writes_file(self, tmp_path, capsys):
+        """--diagrams + --quiet : aucun affichage mais le PNG est écrit."""
+        p = _make_json(tmp_path, CANTILEVER_JSON_DATA)
+        png = tmp_path / "silent.png"
+        rc, out, _ = _run(["run", str(p), "--diagrams", str(png), "--quiet"], capsys)
+        assert rc == 0
+        assert out == ""
+        assert png.exists()
+
+    def test_diagrams_warns_on_non_beam(self, tmp_path, capsys):
+        """--diagrams sur un modèle sans poutre émet un avertissement."""
+        p = _make_json(tmp_path, STATIC_DATA)
+        png = tmp_path / "none.png"
+        rc, out, _ = _run(["run", str(p), "--diagrams", str(png)], capsys)
+        assert rc == 0
+        assert not png.exists()
+        assert "poutre" in out.lower()
+
     def test_modal_displays_frequencies(self, tmp_path, capsys):
         p = _make_json(tmp_path, MODAL_DATA)
         _, out, _ = _run(["run", str(p)], capsys)

@@ -1,0 +1,49 @@
+{
+  "name": "Console sous charge répartie — diagrammes M/V/N",
+  "description": "Poutre console Beam2D (encastrée au nœud 0, libre au nœud 4) de longueur L=2 m, section rectangulaire 50×100 mm, acier 210 GPa. Charge transverse répartie uniforme q=-8 kN/m sur les 4 éléments. Solution RDM : effort tranchant LINÉAIRE V(x)=q·(L-x) avec |V|max=q·L=16 kN à l'encastrement ; moment fléchissant PARABOLIQUE M(x)=q·(L-x)²/2 avec |M|max=q·L²/2=16 kN·m à l'encastrement. Flèche analytique en bout δ=q·L⁴/(8EI). Lancer : python -m femsolver run examples/cantilever_distributed_beam.json --diagrams",
+  "materials": {
+    "steel": { "E": 210e9, "nu": 0.3, "rho": 7800 }
+  },
+  "nodes": [
+    [0.0, 0.0],
+    [0.5, 0.0],
+    [1.0, 0.0],
+    [1.5, 0.0],
+    [2.0, 0.0]
+  ],
+  "elements": [
+    {
+      "type": "Beam2D", "nodes": [0, 1], "material": "steel",
+      "section": {"type": "rectangular", "width": 0.05, "height": 0.10}
+    },
+    {
+      "type": "Beam2D", "nodes": [1, 2], "material": "steel",
+      "section": {"type": "rectangular", "width": 0.05, "height": 0.10}
+    },
+    {
+      "type": "Beam2D", "nodes": [2, 3], "material": "steel",
+      "section": {"type": "rectangular", "width": 0.05, "height": 0.10}
+    },
+    {
+      "type": "Beam2D", "nodes": [3, 4], "material": "steel",
+      "section": {"type": "rectangular", "width": 0.05, "height": 0.10}
+    }
+  ],
+  "boundary_conditions": {
+    "dirichlet": [
+      {"node": 0, "dof": 0, "value": 0.0},
+      {"node": 0, "dof": 1, "value": 0.0},
+      {"node": 0, "dof": 2, "value": 0.0}
+    ],
+    "neumann": [],
+    "distributed": [
+      {"nodes": [0, 1], "qy": -8000.0},
+      {"nodes": [1, 2], "qy": -8000.0},
+      {"nodes": [2, 3], "qy": -8000.0},
+      {"nodes": [3, 4], "qy": -8000.0}
+    ]
+  },
+  "analysis": {
+    "type": "static"
+  }
+}

@@ -321,6 +321,16 @@ Vecteur d'accélération en m/s². `b = ρ × acceleration`.
 
 **Résultats :** `u` (liste de longueur n_dof, déplacements en m).
 
+Pour les modèles contenant des poutres (`Beam2D`, `Beam2DTimoshenko`, `Beam3D`),
+l'option CLI `--diagrams [out.png]` trace les diagrammes d'efforts internes
+M / V / N (et la torsion T en 3D). Les efforts sont reconstruits par équilibre,
+de sorte qu'une charge répartie donne un moment **parabolique** et un effort
+tranchant **linéaire** exacts :
+
+```bash
+python -m femsolver run examples/cantilever_distributed_beam.json --diagrams
+```
+
 ### `modal` — Analyse modale
 
 ```json
