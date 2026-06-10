@@ -19,17 +19,24 @@ class ElasticMaterial:
         Coefficient de Poisson [-]. Doit vérifier -1 < nu < 0.5.
     rho : float
         Masse volumique [kg/m³]. Doit être strictement positive.
+    alpha : float, optional
+        Coefficient de dilatation thermique linéaire [1/K]. Défaut 0.0
+        (aucune déformation thermique). Doit être ≥ 0. Pour l'acier,
+        α ≈ 1.2e-5 /K ; pour l'aluminium, α ≈ 2.3e-5 /K.
 
     Examples
     --------
-    >>> steel = ElasticMaterial(E=210e9, nu=0.3, rho=7800)
+    >>> steel = ElasticMaterial(E=210e9, nu=0.3, rho=7800, alpha=1.2e-5)
     >>> steel.E
     210000000000.0
+    >>> steel.alpha
+    1.2e-05
     """
 
     E: float
     nu: float
     rho: float
+    alpha: float = 0.0
 
     def __post_init__(self) -> None:
         if self.E <= 0:
@@ -38,6 +45,10 @@ class ElasticMaterial:
             raise ValueError(f"Poisson doit être dans ]-1, 0.5[, reçu nu={self.nu}")
         if self.rho <= 0:
             raise ValueError(f"La densité doit être > 0, reçu rho={self.rho}")
+        if self.alpha < 0:
+            raise ValueError(
+                f"Le coefficient de dilatation doit être ≥ 0, reçu alpha={self.alpha}"
+            )
 
     @property
     def G(self) -> float:

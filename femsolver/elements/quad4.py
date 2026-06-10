@@ -6,6 +6,7 @@ import numpy as np
 
 from femsolver.core.element import Element
 from femsolver.core.material import ElasticMaterial
+from femsolver.core.thermal import THERMAL_UNIT_2D, delta_T_at, normalize_delta_T
 
 
 # ---------------------------------------------------------------------------
@@ -679,6 +680,47 @@ class Quad4(Element):
             f_e += w * np.kron(Nv, b) * det_J
         return f_e * (material.rho * t)
 
+    def thermal_force_vector(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        delta_T: float | np.ndarray,
+    ) -> np.ndarray:
+        """Forces nodales thermiques f_e = t·Σₚ wₚ Bₚᵀ D ε_th |det Jₚ| (8,).
+
+        Intégration 2×2 Gauss. À chaque point, ε_th = α·ΔT(ξ,η)·[1,1,0] avec
+        ΔT interpolé par les fonctions de forme pour un champ nodal.
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (E, nu, alpha).
+        nodes : np.ndarray, shape (4, 2)
+            Coordonnées nodales.
+        properties : dict
+            ``"thickness"`` et optionnellement ``"formulation"``.
+        delta_T : float or np.ndarray
+            ΔT scalaire (uniforme) ou nodal (longueur 4).
+
+        Returns
+        -------
+        f_e : np.ndarray, shape (8,)
+            Forces nodales thermiques [N].
+        """
+        t = properties["thickness"]
+        formulation = properties.get("formulation", "plane_stress")
+        D = self._elasticity_matrix(material, formulation)
+        dT = normalize_delta_T(delta_T, 4)
+
+        f_e = np.zeros(8)
+        for xi, eta, w in _GAUSS_POINTS_2X2:
+            B, det_J = self._strain_displacement_matrix(xi, eta, nodes)
+            Nv = self._shape_functions(xi, eta)
+            eps_th = material.alpha * delta_T_at(dT, Nv) * THERMAL_UNIT_2D
+            f_e += w * (B.T @ (D @ eps_th)) * det_J
+        return f_e * t
+
     def strain(
         self,
         nodes: np.ndarray,
@@ -713,8 +755,9 @@ class Quad4(Element):
         xi: float = 0.0,
         eta: float = 0.0,
         formulation: str = "plane_stress",
+        delta_T: float | np.ndarray | None = None,
     ) -> np.ndarray:
-        """Vecteur de contraintes σ = D · B · u_e au point (ξ, η).
+        """Vecteur de contraintes σ = D · (ε − ε_th) au point (ξ, η).
 
         Parameters
         ----------
@@ -728,6 +771,9 @@ class Quad4(Element):
             Point d'évaluation (défaut : centre de l'élément).
         formulation : str
             ``"plane_stress"`` ou ``"plane_strain"``.
+        delta_T : float, np.ndarray or None
+            Variation de température. Si fournie, retranche la déformation
+            thermique ε_th = α·ΔT(ξ,η)·[1,1,0]. ``None`` → purement mécanique.
 
         Returns
         -------
@@ -735,4 +781,9 @@ class Quad4(Element):
             [σxx, σyy, τxy] [Pa].
         """
         D = self._elasticity_matrix(material, formulation)
-        return D @ self.strain(nodes, u_e, xi, eta)
+        eps = self.strain(nodes, u_e, xi, eta)
+        if delta_T is not None:
+            dT = normalize_delta_T(delta_T, 4)
+            Nv = self._shape_functions(xi, eta)
+            eps = eps - material.alpha * delta_T_at(dT, Nv) * THERMAL_UNIT_2D
+        return D @ eps

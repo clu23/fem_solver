@@ -207,7 +207,8 @@ def _parse_material(mat_dict: dict[str, Any]) -> ElasticMaterial:
     Parameters
     ----------
     mat_dict : dict
-        Doit contenir ``"E"``, ``"nu"`` et optionnellement ``"rho"``.
+        Doit contenir ``"E"``, ``"nu"`` et optionnellement ``"rho"`` et
+        ``"alpha"`` (coefficient de dilatation thermique [1/K]).
 
     Returns
     -------
@@ -217,6 +218,7 @@ def _parse_material(mat_dict: dict[str, Any]) -> ElasticMaterial:
         E=float(mat_dict["E"]),
         nu=float(mat_dict["nu"]),
         rho=float(mat_dict.get("rho", 0.0)),
+        alpha=float(mat_dict.get("alpha", 0.0)),
     )
 
 
@@ -317,6 +319,62 @@ def _parse_freqs(freqs_spec: Any) -> np.ndarray:
             return np.logspace(np.log10(float(fmin)), np.log10(float(fmax)), int(n))
         raise ValueError(f"Spec fréquences inconnue : {freqs_spec}")
     return np.asarray(freqs_spec, dtype=float)
+
+
+def _parse_thermal(
+    analysis: dict[str, Any], n_nodes: int
+) -> float | np.ndarray | None:
+    """Construit le champ de température ΔT depuis le bloc ``analysis.thermal``.
+
+    Formats acceptés ::
+
+        "thermal": {"delta_T": 50.0}                  # uniforme (global)
+        "thermal": {"delta_T_nodes": [50, 50, 60, …]} # par nœud (interpolé)
+
+    La forme ``delta_T`` accepte aussi directement une liste (équivalente à
+    ``delta_T_nodes``).
+
+    Parameters
+    ----------
+    analysis : dict
+        Bloc ``analysis`` du JSON.
+    n_nodes : int
+        Nombre de nœuds du maillage (pour valider un champ nodal).
+
+    Returns
+    -------
+    float, np.ndarray or None
+        Scalaire (ΔT uniforme), tableau ``(n_nodes,)`` (ΔT nodal) ou ``None``
+        si aucun chargement thermique n'est défini.
+
+    Raises
+    ------
+    ValueError
+        Si un champ nodal n'a pas la longueur ``n_nodes``.
+    """
+    thermal = analysis.get("thermal")
+    if thermal is None:
+        return None
+
+    if "delta_T_nodes" in thermal:
+        field = np.asarray(thermal["delta_T_nodes"], dtype=float)
+    elif "delta_T" in thermal:
+        val = thermal["delta_T"]
+        if isinstance(val, (list, tuple)):
+            field = np.asarray(val, dtype=float)
+        else:
+            return float(val)   # ΔT uniforme global
+    else:
+        raise ValueError(
+            "Le bloc 'thermal' requiert 'delta_T' (scalaire ou liste) ou "
+            "'delta_T_nodes' (liste par nœud)."
+        )
+
+    if field.shape != (n_nodes,):
+        raise ValueError(
+            f"Champ ΔT nodal de longueur {field.shape[0]} ≠ {n_nodes} nœuds."
+        )
+    return field
 
 
 def _parse_damping(
@@ -713,7 +771,7 @@ def _dispatch_analysis(
     dict[str, Any]
     """
     if atype == "static":
-        return _run_static(mesh, bc, verbose=verbose)
+        return _run_static(mesh, bc, analysis, verbose=verbose)
     if atype == "modal":
         return _run_modal(mesh, bc, analysis, verbose=verbose)
     if atype == "buckling":
@@ -736,11 +794,22 @@ def _dispatch_analysis(
 # ---------------------------------------------------------------------------
 
 def _run_static(
-    mesh: Mesh, bc: BoundaryConditions, *, verbose: bool
+    mesh: Mesh,
+    bc: BoundaryConditions,
+    analysis: dict[str, Any],
+    *,
+    verbose: bool,
 ) -> dict[str, Any]:
     assembler = Assembler(mesh)
     K = assembler.assemble_stiffness()
     F = assembler.assemble_forces(bc)
+
+    # Chargement thermomécanique : F_th = ∫ Bᵀ D (α ΔT m) dV s'ajoute au
+    # second membre. ΔT uniforme (scalaire) ou nodal (interpolé par N).
+    delta_T = _parse_thermal(analysis, mesh.n_nodes)
+    if delta_T is not None:
+        F = F + assembler.assemble_thermal_forces(delta_T)
+
     ds = apply_dirichlet(K, F, mesh, bc)
     u = StaticSolver().solve(ds.K_free, ds.F_free)
     u_full = ds.recover(u)

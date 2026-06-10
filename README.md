@@ -2,7 +2,7 @@
 
 Solveur éléments finis pour la mécanique des solides, écrit en Python. Couvre l'analyse statique, le flambage, la dynamique modale et transitoire, et la réponse aléatoire (PSD). Les modèles se définissent en JSON et se lancent en une commande.
 
-**917 tests · 14 types d'éléments · 7 types d'analyse · Python 3.11+**
+**940 tests · 14 types d'éléments · 7 types d'analyse · Python 3.11+**
 
 ---
 
@@ -65,6 +65,8 @@ Sept profils paramétriques utilisables pour `Beam2D`, `Beam2DTimoshenko` et `Be
 | `random_base` | Réponse PSD à une excitation de base, équation de Miles incluse |
 
 Modèles d'amortissement : Rayleigh (αM + βK), hystérétique (K·iη), modal (ξₙ par mode).
+
+**Chargement thermomécanique** : un champ de température ΔT impose une déformation thermique ε_th = α·ΔT et un vecteur de forces équivalent F_th = ∫ Bᵀ·D·ε_th dV (résolution K·u = F + F_th). Le coefficient de dilatation α est porté par `ElasticMaterial`. ΔT peut être uniforme (scalaire global) ou défini par nœud (interpolé via les fonctions de forme). Supporté par tous les éléments continus (Tri3, Quad4, Tri6, Quad8, Tetra4, Hexa8, Tetra10, Hexa20) ; la récupération de contrainte retranche ε_th (σ = D·(B u − ε_th)). Cas types : barre encastrée-encastrée chauffée → σ = −E·α·ΔT (compression) ; barre libre → δ = α·ΔT·L (σ = 0). En JSON : bloc `"thermal"` de l'analyse.
 
 **Vérification du modèle avant résolution** (style Abaqus : vérifier, avertir, bloquer si grave). Avant chaque résolution, `run_model_checks` détecte les défauts de modélisation :
 
@@ -227,7 +229,7 @@ Chaque fichier est exécutable directement : `python -m femsolver run examples/<
 ## Tests
 
 ```bash
-# Suite complète (917 tests, ~15 s)
+# Suite complète (940 tests, ~17 s)
 python -m pytest tests/ -v
 
 # Fichier unique
@@ -249,7 +251,8 @@ fem-solver/
 │   ├── __main__.py              # CLI : run / validate / info
 │   ├── core/
 │   │   ├── element.py           # Classe abstraite Element
-│   │   ├── material.py          # ElasticMaterial, matrice de comportement D
+│   │   ├── material.py          # ElasticMaterial (E, ν, ρ, α), matrice de comportement D
+│   │   ├── thermal.py           # Déformation thermique ε_th = α·ΔT, interpolation ΔT
 │   │   ├── mesh.py              # Mesh, ElementData, BoundaryConditions,
 │   │   │                        #   PressureLoad, BodyForce, DistributedLineLoad
 │   │   ├── sections.py          # 7 profils : RectangularSection, CircularSection,
@@ -289,7 +292,7 @@ fem-solver/
 │       ├── plotter3d.py         # PyVista
 │       ├── beam_diagrams.py     # diagrammes d'efforts internes M/V/N (poutres)
 │       └── error_estimator.py   # indicateur ZZ par élément
-├── tests/                       # 32 fichiers, 917 tests
+├── tests/                       # 33 fichiers, 940 tests
 ├── examples/                    # 12 modèles JSON + scripts Python annotés
 ├── docs/
 │   └── json_schema.md           # Schéma JSON complet avec exemples

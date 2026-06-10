@@ -102,6 +102,7 @@ import numpy as np
 
 from femsolver.core.element import Element
 from femsolver.core.material import ElasticMaterial
+from femsolver.core.thermal import THERMAL_UNIT_3D, delta_T_at, normalize_delta_T
 
 
 # ---------------------------------------------------------------------------
@@ -547,6 +548,45 @@ class Hexa20(Element):
                 f_e[3 * i + 2] += coeff * Nv[i] * b[2]
         return f_e
 
+    def thermal_force_vector(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        delta_T: float | np.ndarray,
+    ) -> np.ndarray:
+        """Forces nodales thermiques f_e = Σ_gp w Bᵀ D ε_th |det J| (60,).
+
+        Intégration 3×3×3 Gauss. ε_th = α·ΔT(ξ,η,ζ)·[1,1,1,0,0,0], ΔT
+        interpolé par les fonctions de forme sérendipité pour un champ nodal.
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (E, nu, alpha).
+        nodes : np.ndarray, shape (20, 3)
+            Coordonnées nodales.
+        properties : dict
+            Non utilisé pour Hexa20 (peut être ``{}``).
+        delta_T : float or np.ndarray
+            ΔT scalaire (uniforme) ou nodal (longueur 20).
+
+        Returns
+        -------
+        f_e : np.ndarray, shape (60,)
+            Forces nodales thermiques [N].
+        """
+        D = material.elasticity_matrix_3d()
+        dT = normalize_delta_T(delta_T, 20)
+
+        f_e = np.zeros(60)
+        for xi, eta, zeta, w in _GAUSS_POINTS_3X3X3:
+            det_J, B = self._jacobian_and_B(xi, eta, zeta, nodes)
+            Nv = self._shape_functions(xi, eta, zeta)
+            eps_th = material.alpha * delta_T_at(dT, Nv) * THERMAL_UNIT_3D
+            f_e += (w * det_J) * (B.T @ (D @ eps_th))
+        return f_e
+
     # ------------------------------------------------------------------
     # Post-traitement
     # ------------------------------------------------------------------
@@ -584,8 +624,9 @@ class Hexa20(Element):
         xi: float = 0.0,
         eta: float = 0.0,
         zeta: float = 0.0,
+        delta_T: float | np.ndarray | None = None,
     ) -> np.ndarray:
-        """Vecteur de contraintes σ = D · B · u_e.
+        """Vecteur de contraintes σ = D · (ε − ε_th) au point (ξ, η, ζ).
 
         Parameters
         ----------
@@ -594,6 +635,9 @@ class Hexa20(Element):
         u_e : np.ndarray, shape (60,)
         xi, eta, zeta : float
             Point d'évaluation (défaut : centre).
+        delta_T : float, np.ndarray or None
+            Variation de température. Si fournie, retranche la déformation
+            thermique ε_th = α·ΔT·[1,1,1,0,0,0]. ``None`` → purement mécanique.
 
         Returns
         -------
@@ -601,7 +645,12 @@ class Hexa20(Element):
             [σxx, σyy, σzz, τyz, τxz, τxy] [Pa].
         """
         D = material.elasticity_matrix_3d()
-        return D @ self.strain(nodes, u_e, xi, eta, zeta)
+        eps = self.strain(nodes, u_e, xi, eta, zeta)
+        if delta_T is not None:
+            dT = normalize_delta_T(delta_T, 20)
+            Nv = self._shape_functions(xi, eta, zeta)
+            eps = eps - material.alpha * delta_T_at(dT, Nv) * THERMAL_UNIT_3D
+        return D @ eps
 
     # ------------------------------------------------------------------
     # Interface batch

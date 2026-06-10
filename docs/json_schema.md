@@ -44,8 +44,8 @@ results = run_from_json("mon_modele.json")  # → dict
 
 ```json
 "materials": {
-    "acier": { "E": 210e9, "nu": 0.3, "rho": 7800 },
-    "alu":   { "E": 70e9,  "nu": 0.33, "rho": 2700 }
+    "acier": { "E": 210e9, "nu": 0.3, "rho": 7800, "alpha": 1.2e-5 },
+    "alu":   { "E": 70e9,  "nu": 0.33, "rho": 2700, "alpha": 2.3e-5 }
 }
 ```
 
@@ -54,6 +54,7 @@ results = run_from_json("mon_modele.json")  # → dict
 | `E` | oui | Pa | Module d'Young |
 | `nu` | oui | — | Coefficient de Poisson |
 | `rho` | non | kg/m³ | Masse volumique (défaut : 0) |
+| `alpha` | non | 1/K | Coefficient de dilatation thermique (défaut : 0 ; voir bloc `thermal`) |
 
 ---
 
@@ -330,6 +331,27 @@ tranchant **linéaire** exacts :
 ```bash
 python -m femsolver run examples/cantilever_distributed_beam.json --diagrams
 ```
+
+**Chargement thermomécanique** (optionnel) — un bloc `thermal` ajoute un champ
+de température ΔT, qui génère une déformation thermique ε_th = α·ΔT (α lu sur le
+matériau) et un vecteur de forces équivalent F_th = ∫ Bᵀ·D·ε_th dV résolu en
+plus des forces mécaniques (`K·u = F + F_th`).
+
+```json
+"analysis": {
+    "type": "static",
+    "thermal": {"delta_T": 100.0}
+}
+```
+
+| Clé | Type | Description |
+|-----|------|-------------|
+| `delta_T` | nombre **ou** liste | ΔT uniforme (scalaire global) ou champ nodal (liste de longueur n_nodes) |
+| `delta_T_nodes` | liste | Variante explicite du champ nodal (longueur n_nodes), interpolé via les fonctions de forme |
+
+Supporté par les éléments continus (`Tri3`, `Quad4`, `Tri6`, `Quad8`, `Tetra4`,
+`Hexa8`, `Tetra10`, `Hexa20`). Exemple : `examples/thermal_clamped_bar.json`
+(barre encastrée-encastrée chauffée → contrainte de compression σ = −E·α·ΔT).
 
 ### `modal` — Analyse modale
 

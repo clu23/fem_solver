@@ -676,6 +676,69 @@ class Assembler:
         vals = np.concatenate(vals_list) if vals_list else np.array([], dtype=float)
         return coo_matrix((vals, (rows, cols)), shape=(n_dof, n_dof)).tocsr()
 
+    def assemble_thermal_forces(
+        self, delta_T: float | np.ndarray
+    ) -> np.ndarray:
+        """Assemble le vecteur de forces thermiques équivalentes F_th (n_dof,).
+
+        Pour un champ de température ΔT, chaque élément continu produit un
+        vecteur de forces nodales ``f_e = ∫ Bᵀ D ε_th dV`` avec la déformation
+        thermique ε_th = α·ΔT·m (m unitaire de dilatation isotrope). Ces
+        contributions sont scatterées dans le vecteur global. La résolution
+        statique devient alors ``K u = F_mécanique + F_th``.
+
+        Seuls les éléments implémentant ``thermal_force_vector()`` contribuent
+        (éléments continus). Les autres (Bar2D, poutres, ressorts, amortisseurs)
+        sont ignorés silencieusement (``NotImplementedError`` capturée).
+
+        Parameters
+        ----------
+        delta_T : float or np.ndarray
+            Champ de température. Un scalaire applique le même ΔT uniforme à
+            tous les éléments. Un tableau de forme ``(n_nodes,)`` donne le ΔT à
+            chaque nœud du maillage ; chaque élément reçoit alors les valeurs de
+            ses propres nœuds, interpolées via ses fonctions de forme.
+
+        Returns
+        -------
+        F_th : np.ndarray, shape (n_dof,)
+            Vecteur de forces thermiques équivalentes [N].
+
+        Raises
+        ------
+        ValueError
+            Si ``delta_T`` est un tableau dont la longueur ≠ ``n_nodes``.
+
+        Examples
+        --------
+        >>> F_th = Assembler(mesh).assemble_thermal_forces(50.0)  # ΔT = +50 K
+        >>> F_th.shape   # (n_dof,)
+        """
+        mesh = self.mesh
+        dT_arr = np.asarray(delta_T, dtype=float)
+        is_field = dT_arr.ndim > 0
+        if is_field and dT_arr.shape != (mesh.n_nodes,):
+            raise ValueError(
+                f"Champ ΔT de forme {dT_arr.shape} incompatible avec "
+                f"{mesh.n_nodes} nœuds (attendu scalaire ou shape ({mesh.n_nodes},))."
+            )
+
+        F = np.zeros(mesh.n_dof)
+        for elem_data in mesh.elements:
+            elem = elem_data.get_element()
+            node_coords = mesh.node_coords(elem_data.node_ids)
+            dT_elem = dT_arr[list(elem_data.node_ids)] if is_field else dT_arr
+            try:
+                f_e = elem.thermal_force_vector(
+                    elem_data.material, node_coords, elem_data.properties, dT_elem
+                )
+            except NotImplementedError:
+                continue
+            dofs = mesh.global_dofs(elem_data.node_ids)
+            for i, di in enumerate(dofs):
+                F[di] += f_e[i]
+        return F
+
     def assemble_forces(self, bc: BoundaryConditions) -> np.ndarray:
         """Assemble le vecteur de forces nodales F à partir des conditions aux limites.
 

@@ -6,6 +6,7 @@ import numpy as np
 
 from femsolver.core.element import Element
 from femsolver.core.material import ElasticMaterial
+from femsolver.core.thermal import THERMAL_UNIT_2D, mean_delta_T, normalize_delta_T
 
 
 class Tri3(Element):
@@ -314,6 +315,43 @@ class Tri3(Element):
         f_node = material.rho * t * area / 3.0 * b   # shape (2,)
         return np.tile(f_node, 3)
 
+    def thermal_force_vector(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        delta_T: float | np.ndarray,
+    ) -> np.ndarray:
+        """Forces nodales thermiques f_e = Bᵀ D ε_th · A · t (6,).
+
+        B étant constant (CST), l'intégrale se réduit à une évaluation. Pour un
+        champ ΔT nodal, ``∫_A N_i dA = A/3`` pour chaque nœud, donc seul le ΔT
+        moyen intervient : ``∫_A ε_th dA = α·ΔT_moyen·m·A``.
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (E, nu, alpha).
+        nodes : np.ndarray, shape (3, 2)
+            Coordonnées nodales.
+        properties : dict
+            ``"thickness"`` et optionnellement ``"formulation"``.
+        delta_T : float or np.ndarray
+            ΔT scalaire (uniforme) ou nodal (longueur 3).
+
+        Returns
+        -------
+        f_e : np.ndarray, shape (6,)
+            Forces nodales thermiques [N].
+        """
+        t = properties["thickness"]
+        formulation = properties.get("formulation", "plane_stress")
+        D = self._elasticity_matrix(material, formulation)
+        B, area = self._strain_displacement_matrix(nodes)
+        dT = mean_delta_T(normalize_delta_T(delta_T, 3))
+        eps_th = material.alpha * dT * THERMAL_UNIT_2D
+        return (B.T @ (D @ eps_th)) * (area * t)
+
     def strain(self, nodes: np.ndarray, u_e: np.ndarray) -> np.ndarray:
         """Vecteur de déformations ε = B · u_e (constant dans l'élément).
 
@@ -338,8 +376,9 @@ class Tri3(Element):
         nodes: np.ndarray,
         u_e: np.ndarray,
         formulation: str = "plane_stress",
+        delta_T: float | np.ndarray | None = None,
     ) -> np.ndarray:
-        """Vecteur de contraintes σ = D · B · u_e (constant dans l'élément).
+        """Vecteur de contraintes σ = D · (ε − ε_th) (constant dans l'élément).
 
         Parameters
         ----------
@@ -351,6 +390,10 @@ class Tri3(Element):
             Déplacements élémentaires.
         formulation : str
             ``"plane_stress"`` ou ``"plane_strain"``.
+        delta_T : float, np.ndarray or None
+            Variation de température. Si fournie, la déformation thermique
+            ε_th = α·ΔT·[1,1,0] est retranchée : σ = D·(B u − ε_th). ``None``
+            (défaut) → contrainte purement mécanique.
 
         Returns
         -------
@@ -358,7 +401,11 @@ class Tri3(Element):
             [σxx, σyy, τxy] [Pa].
         """
         D = self._elasticity_matrix(material, formulation)
-        return D @ self.strain(nodes, u_e)
+        eps = self.strain(nodes, u_e)
+        if delta_T is not None:
+            dT = mean_delta_T(normalize_delta_T(delta_T, 3))
+            eps = eps - material.alpha * dT * THERMAL_UNIT_2D
+        return D @ eps
 
     # ------------------------------------------------------------------
     # Interface batch (vectorisation sur N_e éléments simultanément)

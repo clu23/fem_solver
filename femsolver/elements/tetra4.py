@@ -74,6 +74,7 @@ import numpy as np
 
 from femsolver.core.element import Element
 from femsolver.core.material import ElasticMaterial
+from femsolver.core.thermal import THERMAL_UNIT_3D, mean_delta_T, normalize_delta_T
 
 
 class Tetra4(Element):
@@ -378,6 +379,41 @@ class Tetra4(Element):
         f_node = material.rho * volume / 4.0 * b   # shape (3,)
         return np.tile(f_node, 4)
 
+    def thermal_force_vector(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        delta_T: float | np.ndarray,
+    ) -> np.ndarray:
+        """Forces nodales thermiques f_e = Bᵀ D ε_th · V (12,).
+
+        B étant constant (CST 3D), l'intégrale se réduit à une évaluation. Pour
+        un champ ΔT nodal, ``∫_V N_i dV = V/4`` pour chaque nœud, donc seul le
+        ΔT moyen intervient : ``∫_V ε_th dV = α·ΔT_moyen·m·V``.
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (E, nu, alpha).
+        nodes : np.ndarray, shape (4, 3)
+            Coordonnées nodales.
+        properties : dict
+            Non utilisé pour Tetra4 (peut être ``{}``).
+        delta_T : float or np.ndarray
+            ΔT scalaire (uniforme) ou nodal (longueur 4).
+
+        Returns
+        -------
+        f_e : np.ndarray, shape (12,)
+            Forces nodales thermiques [N].
+        """
+        D = material.elasticity_matrix_3d()
+        B, volume = self._strain_displacement_matrix(nodes)
+        dT = mean_delta_T(normalize_delta_T(delta_T, 4))
+        eps_th = material.alpha * dT * THERMAL_UNIT_3D
+        return (B.T @ (D @ eps_th)) * volume
+
     # ------------------------------------------------------------------
     # Post-traitement
     # ------------------------------------------------------------------
@@ -409,8 +445,9 @@ class Tetra4(Element):
         material: ElasticMaterial,
         nodes: np.ndarray,
         u_e: np.ndarray,
+        delta_T: float | np.ndarray | None = None,
     ) -> np.ndarray:
-        """Vecteur de contraintes σ = D · B · u_e (constant dans l'élément).
+        """Vecteur de contraintes σ = D · (ε − ε_th) (constant dans l'élément).
 
         Parameters
         ----------
@@ -420,6 +457,9 @@ class Tetra4(Element):
             Coordonnées nodales.
         u_e : np.ndarray, shape (12,)
             Déplacements élémentaires.
+        delta_T : float, np.ndarray or None
+            Variation de température. Si fournie, retranche la déformation
+            thermique ε_th = α·ΔT·[1,1,1,0,0,0]. ``None`` → purement mécanique.
 
         Returns
         -------
@@ -427,7 +467,11 @@ class Tetra4(Element):
             [σxx, σyy, σzz, τyz, τxz, τxy] [Pa].
         """
         D = material.elasticity_matrix_3d()
-        return D @ self.strain(nodes, u_e)
+        eps = self.strain(nodes, u_e)
+        if delta_T is not None:
+            dT = mean_delta_T(normalize_delta_T(delta_T, 4))
+            eps = eps - material.alpha * dT * THERMAL_UNIT_3D
+        return D @ eps
 
     # ------------------------------------------------------------------
     # Interface batch (vectorisation sur N_e éléments simultanément)

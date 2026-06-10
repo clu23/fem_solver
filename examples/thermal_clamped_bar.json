@@ -1,0 +1,35 @@
+{
+    "name": "Thermal clamped-clamped bar",
+    "description": "Barre encastree-encastree chauffee de dT=100 K. Bloquee en x aux deux extremites, elle ne peut pas se dilater : il apparait une contrainte de compression uniforme sigma_xx = -E*alpha*dT = -252 MPa (independante de nu). La dilatation transverse y reste libre (sigma_yy = 0). Maillage de 4 Quad4 en contrainte plane.",
+    "materials": {
+        "steel": {"E": 210e9, "nu": 0.3, "rho": 7850, "alpha": 1.2e-5}
+    },
+    "nodes": [
+        [0.0, 0.0], [0.25, 0.0], [0.5, 0.0], [0.75, 0.0], [1.0, 0.0],
+        [0.0, 0.05], [0.25, 0.05], [0.5, 0.05], [0.75, 0.05], [1.0, 0.05]
+    ],
+    "elements": [
+        {"type": "Quad4", "nodes": [0, 1, 6, 5], "material": "steel", "thickness": 0.01},
+        {"type": "Quad4", "nodes": [1, 2, 7, 6], "material": "steel", "thickness": 0.01},
+        {"type": "Quad4", "nodes": [2, 3, 8, 7], "material": "steel", "thickness": 0.01},
+        {"type": "Quad4", "nodes": [3, 4, 9, 8], "material": "steel", "thickness": 0.01}
+    ],
+    "boundary_conditions": {
+        "dirichlet": [
+            {"node": 0, "dof": 0, "value": 0.0},
+            {"node": 5, "dof": 0, "value": 0.0},
+            {"node": 4, "dof": 0, "value": 0.0},
+            {"node": 9, "dof": 0, "value": 0.0},
+            {"node": 0, "dof": 1, "value": 0.0},
+            {"node": 1, "dof": 1, "value": 0.0},
+            {"node": 2, "dof": 1, "value": 0.0},
+            {"node": 3, "dof": 1, "value": 0.0},
+            {"node": 4, "dof": 1, "value": 0.0}
+        ],
+        "neumann": []
+    },
+    "analysis": {
+        "type": "static",
+        "thermal": {"delta_T": 100.0}
+    }
+}

@@ -254,6 +254,52 @@ class Element(ABC):
             "l'amortissement structural passe par le modèle de Rayleigh / modal."
         )
 
+    def thermal_force_vector(
+        self,
+        material: ElasticMaterial,
+        nodes: np.ndarray,
+        properties: dict,
+        delta_T: float | np.ndarray,
+    ) -> np.ndarray:
+        """Forces nodales équivalentes à une dilatation thermique ΔT.
+
+        Pour une déformation thermique libre ε_th = α·ΔT·m (m unitaire de
+        dilatation isotrope), le terme de précontrainte au second membre est :
+
+            f_e = ∫_Ve  Bᵀ · D · ε_th dV
+
+        Ce vecteur s'ajoute aux forces mécaniques : on résout K u = F + F_th.
+
+        Parameters
+        ----------
+        material : ElasticMaterial
+            Matériau (E, nu pour D ; alpha pour ε_th).
+        nodes : np.ndarray, shape (n_elem_nodes, n_dim)
+            Coordonnées des nœuds.
+        properties : dict
+            Propriétés géométriques (épaisseur pour éléments 2D, etc.).
+        delta_T : float or np.ndarray
+            Variation de température : scalaire (uniforme dans l'élément) ou
+            tableau de longueur ``n_nodes`` (valeurs nodales interpolées via
+            les fonctions de forme).
+
+        Returns
+        -------
+        f_e : np.ndarray, shape (n_dof_elem,)
+            Forces nodales thermiques équivalentes [N], en repère global.
+
+        Raises
+        ------
+        NotImplementedError
+            Pour les éléments qui ne portent pas de déformation thermique
+            (Bar2D, poutres, ressorts, amortisseurs).
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} ne supporte pas le chargement thermique. "
+            "Implémentez thermal_force_vector() dans la sous-classe (éléments "
+            "continus Tri3/Quad4/Tri6/Quad8/Tetra4/Hexa8/Tetra10/Hexa20)."
+        )
+
     def distributed_load_vector(
         self,
         material: ElasticMaterial,
