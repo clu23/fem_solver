@@ -21,6 +21,7 @@ from femsolver.core.mesh import (
     PressureLoad,
 )
 from femsolver.core.mpc import apply_mpc_elimination, apply_mpc_lagrange, recover_mpc
+from femsolver.core.rigid import make_rbe2_constraints, make_rbe3_constraints
 from femsolver.core.sections import (
     CircularSection,
     CSection,
@@ -45,6 +46,8 @@ __all__ = [
     "apply_mpc_elimination",
     "apply_mpc_lagrange",
     "recover_mpc",
+    "make_rbe2_constraints",
+    "make_rbe3_constraints",
     "Element",
     "ElasticMaterial",
     "BodyForce",

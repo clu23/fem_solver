@@ -2,7 +2,7 @@
 
 Solveur éléments finis pour la mécanique des solides, écrit en Python. Couvre l'analyse statique, le flambage, la dynamique modale et transitoire, et la réponse aléatoire (PSD). Les modèles se définissent en JSON et se lancent en une commande.
 
-**940 tests · 14 types d'éléments · 7 types d'analyse · Python 3.11+**
+**959 tests · 14 types d'éléments · 7 types d'analyse · Python 3.11+**
 
 ---
 
@@ -67,6 +67,8 @@ Sept profils paramétriques utilisables pour `Beam2D`, `Beam2DTimoshenko` et `Be
 Modèles d'amortissement : Rayleigh (αM + βK), hystérétique (K·iη), modal (ξₙ par mode).
 
 **Chargement thermomécanique** : un champ de température ΔT impose une déformation thermique ε_th = α·ΔT et un vecteur de forces équivalent F_th = ∫ Bᵀ·D·ε_th dV (résolution K·u = F + F_th). Le coefficient de dilatation α est porté par `ElasticMaterial`. ΔT peut être uniforme (scalaire global) ou défini par nœud (interpolé via les fonctions de forme). Supporté par tous les éléments continus (Tri3, Quad4, Tri6, Quad8, Tetra4, Hexa8, Tetra10, Hexa20) ; la récupération de contrainte retranche ε_th (σ = D·(B u − ε_th)). Cas types : barre encastrée-encastrée chauffée → σ = −E·α·ΔT (compression) ; barre libre → δ = α·ΔT·L (σ = 0). En JSON : bloc `"thermal"` de l'analyse.
+
+**Éléments rigides RBE2 / RBE3** : exprimés comme contraintes multi-points (MPC), sans matrice de rigidité, appliqués par multiplicateurs de Lagrange. **RBE2** (liaison rigide) lie N nœuds esclaves au mouvement de corps rigide d'un nœud maître (u_S = u_M + ω_M × r ; θ_S = θ_M) — utile pour distribuer une force, simuler un boulon ou raccorder des maillages incompatibles ; il rigidifie la structure. **RBE3** (distribution) impose au nœud de référence la moyenne pondérée des nœuds indépendants (u_ref = Σ wᵢ·uᵢ / Σ wᵢ) **sans ajouter de rigidité** — pour répartir une charge depuis un point ou mesurer un déplacement moyen. En JSON : bloc de premier niveau `"rigid"` (analyse statique).
 
 **Vérification du modèle avant résolution** (style Abaqus : vérifier, avertir, bloquer si grave). Avant chaque résolution, `run_model_checks` détecte les défauts de modélisation :
 
@@ -223,13 +225,15 @@ Chaque fichier est exécutable directement : `python -m femsolver run examples/<
 | `portal_frame_3d.json` | Statique 3D | Portique Beam3D 4 nœuds, F_x=10 kN. Réactions d'encastrement 3D, bilan d'équilibre toutes directions. |
 | `spring_support_static.json` | Statique | Barre Bar2D + ressort ponctuel `Spring` (appui élastique). Cohabitation élément structural / connecteur. Exact : u₁ₓ=FₓL/(EA), u₁ᵧ=Fᵧ/kᵧ, équilibre vérifié. |
 | `damper_harmonic_sdof.json` | Harmonique | SDOF Bar2D amorti par un amortisseur ponctuel `Damper` seul (ζ=5 %). Pic de résonance fini à f≈5.03 Hz, amplitude≈F/(k·2ζ)=0.1 m. |
+| `rbe2_rigid_link.json` | Statique | Liaison rigide RBE2, maître + 2 esclaves sur ressorts. Moment Mz=10 N·m → rotation de corps rigide θz=Mz/(2kh²)=0.02 rad, esclaves à ∓0.01 m. Exact. |
+| `rbe3_load_distribution.json` | Statique | Distribution RBE3, nœud de référence = moyenne pondérée (1,2,3) de 3 indépendants chargés. u_ref=0.2333 m, aucune rigidité ajoutée. Exact. |
 
 ---
 
 ## Tests
 
 ```bash
-# Suite complète (940 tests, ~17 s)
+# Suite complète (959 tests, ~17 s)
 python -m pytest tests/ -v
 
 # Fichier unique
@@ -262,6 +266,7 @@ fem-solver/
 │   │   ├── boundary.py          # apply_dirichlet (élimination vraie), DirichletSystem
 │   │   ├── solver.py            # StaticSolver, ModalSolver, BucklingSolver
 │   │   ├── mpc.py               # Contraintes multi-points (élimination / Lagrange)
+│   │   ├── rigid.py             # Éléments rigides RBE2 / RBE3 → contraintes MPC
 │   │   ├── diagnostics.py       # Masse/réactions/équilibre + détection de mécanismes
 │   │   └── model_check.py       # Santé du modèle pré-résolution (orphelins, J, singularité…)
 │   ├── elements/
@@ -292,7 +297,7 @@ fem-solver/
 │       ├── plotter3d.py         # PyVista
 │       ├── beam_diagrams.py     # diagrammes d'efforts internes M/V/N (poutres)
 │       └── error_estimator.py   # indicateur ZZ par élément
-├── tests/                       # 33 fichiers, 940 tests
+├── tests/                       # 34 fichiers, 959 tests
 ├── examples/                    # 12 modèles JSON + scripts Python annotés
 ├── docs/
 │   └── json_schema.md           # Schéma JSON complet avec exemples

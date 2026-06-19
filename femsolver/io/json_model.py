@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from scipy.sparse.linalg import spsolve
 
 from femsolver.core.assembler import Assembler
 from femsolver.core.boundary import apply_dirichlet
@@ -41,8 +42,11 @@ from femsolver.core.mesh import (
     DistributedLineLoad,
     ElementData,
     Mesh,
+    MPCConstraint,
     PressureLoad,
 )
+from femsolver.core.mpc import apply_mpc_lagrange
+from femsolver.core.rigid import make_rbe2_constraints, make_rbe3_constraints
 from femsolver.core.sections import (
     CircularSection,
     CSection,
@@ -158,6 +162,9 @@ class FEModel:
         Paramètres d'analyse tels que lus dans le JSON.
     description : str
         Description libre.
+    mpc : tuple[MPCConstraint, ...]
+        Contraintes multi-points issues des éléments rigides (RBE2/RBE3).
+        Appliquées par multiplicateurs de Lagrange en analyse statique.
     """
 
     name: str
@@ -165,6 +172,7 @@ class FEModel:
     bc: BoundaryConditions
     analysis: dict[str, Any]
     description: str = ""
+    mpc: tuple[MPCConstraint, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +383,88 @@ def _parse_thermal(
             f"Champ ΔT nodal de longueur {field.shape[0]} ≠ {n_nodes} nœuds."
         )
     return field
+
+
+def _parse_rigid(data: dict[str, Any], mesh: Mesh) -> tuple[MPCConstraint, ...]:
+    """Construit les contraintes MPC depuis le bloc de premier niveau ``rigid``.
+
+    Chaque entrée est un élément rigide ``RBE2`` ou ``RBE3`` traduit en
+    contraintes multi-points (pas de matrice de rigidité).
+
+    Formats acceptés ::
+
+        "rigid": [
+            {"type": "RBE2", "master": 4, "slaves": [0, 1, 2, 3]},
+            {"type": "RBE2", "master": 4, "slaves": [0, 1], "dofs": [0, 1]},
+            {"type": "RBE3", "ref": 10, "nodes": [0, 1, 2]},
+            {"type": "RBE3", "ref": 10, "nodes": [0, 1, 2],
+             "weights": [1.0, 2.0, 1.0], "dofs": [0, 1]}
+        ]
+
+    Parameters
+    ----------
+    data : dict
+        Données JSON complètes.
+    mesh : Mesh
+        Maillage déjà construit (coordonnées nodales, ``dpn``).
+
+    Returns
+    -------
+    tuple[MPCConstraint, ...]
+        Contraintes concaténées de tous les éléments rigides.
+
+    Raises
+    ------
+    ValueError
+        Si un type rigide est inconnu ou s'il manque une clé obligatoire.
+    """
+    rigid_specs = data.get("rigid", [])
+    constraints: list[MPCConstraint] = []
+
+    for spec in rigid_specs:
+        rtype = spec.get("type")
+        if rtype == "RBE2":
+            if "master" not in spec or "slaves" not in spec:
+                raise ValueError(
+                    "RBE2 requiert les clés 'master' (int) et 'slaves' (liste)."
+                )
+            constraints.extend(
+                make_rbe2_constraints(
+                    mesh,
+                    master=int(spec["master"]),
+                    slaves=[int(n) for n in spec["slaves"]],
+                    dofs=(
+                        [int(d) for d in spec["dofs"]]
+                        if "dofs" in spec else None
+                    ),
+                )
+            )
+        elif rtype == "RBE3":
+            if "ref" not in spec or "nodes" not in spec:
+                raise ValueError(
+                    "RBE3 requiert les clés 'ref' (int) et 'nodes' (liste)."
+                )
+            constraints.extend(
+                make_rbe3_constraints(
+                    mesh,
+                    ref=int(spec["ref"]),
+                    nodes=[int(n) for n in spec["nodes"]],
+                    weights=(
+                        [float(w) for w in spec["weights"]]
+                        if "weights" in spec else None
+                    ),
+                    dofs=(
+                        [int(d) for d in spec["dofs"]]
+                        if "dofs" in spec else None
+                    ),
+                )
+            )
+        else:
+            raise ValueError(
+                f"Type d'élément rigide inconnu : '{rtype}'. Connus : RBE2, RBE3."
+            )
+
+    return tuple(constraints)
 
 
 def _parse_damping(
@@ -655,6 +745,7 @@ def load_model(path: str | Path) -> FEModel:
         data = json.load(fh)
 
     mesh, bc = _build_mesh_and_bc(data)
+    mpc = _parse_rigid(data, mesh)
 
     return FEModel(
         name=data.get("name", path.stem),
@@ -662,6 +753,7 @@ def load_model(path: str | Path) -> FEModel:
         bc=bc,
         analysis=data.get("analysis", {"type": "static"}),
         description=data.get("description", ""),
+        mpc=mpc,
     )
 
 
@@ -739,9 +831,13 @@ def solve_model(model: FEModel, *, verbose: bool = True) -> dict[str, Any]:
     # erreurs bloquantes (orphelins, Jacobien, singularité) → ModelError ;
     # avertissements (nœuds coïncidents, doublons, qualité, conditionnement)
     # loggés, le calcul continue.
-    run_model_checks(mesh, bc, analysis_type=atype).raise_if_errors()
+    run_model_checks(
+        mesh, bc, analysis_type=atype, mpc=model.mpc
+    ).raise_if_errors()
 
-    results = _dispatch_analysis(mesh, bc, analysis, atype, verbose=verbose)
+    results = _dispatch_analysis(
+        mesh, bc, analysis, atype, mpc=model.mpc, verbose=verbose
+    )
     results["name"] = model.name
     results["analysis_type"] = atype
     return results
@@ -757,6 +853,7 @@ def _dispatch_analysis(
     analysis: dict[str, Any],
     atype: str,
     *,
+    mpc: tuple[MPCConstraint, ...] = (),
     verbose: bool,
 ) -> dict[str, Any]:
     """Résout le modèle selon le type d'analyse.
@@ -765,13 +862,20 @@ def _dispatch_analysis(
     ----------
     mesh, bc, analysis, atype, verbose
         Voir ``run_from_json``.
+    mpc : tuple[MPCConstraint, ...]
+        Contraintes rigides (RBE2/RBE3).  Seule l'analyse statique les applique.
 
     Returns
     -------
     dict[str, Any]
     """
+    if mpc and atype != "static":
+        raise NotImplementedError(
+            f"Les éléments rigides (RBE2/RBE3) ne sont supportés qu'en analyse "
+            f"statique pour l'instant, pas en '{atype}'."
+        )
     if atype == "static":
-        return _run_static(mesh, bc, analysis, verbose=verbose)
+        return _run_static(mesh, bc, analysis, mpc=mpc, verbose=verbose)
     if atype == "modal":
         return _run_modal(mesh, bc, analysis, verbose=verbose)
     if atype == "buckling":
@@ -798,6 +902,7 @@ def _run_static(
     bc: BoundaryConditions,
     analysis: dict[str, Any],
     *,
+    mpc: tuple[MPCConstraint, ...] = (),
     verbose: bool,
 ) -> dict[str, Any]:
     assembler = Assembler(mesh)
@@ -810,9 +915,19 @@ def _run_static(
     if delta_T is not None:
         F = F + assembler.assemble_thermal_forces(delta_T)
 
-    ds = apply_dirichlet(K, F, mesh, bc)
-    u = StaticSolver().solve(ds.K_free, ds.F_free)
-    u_full = ds.recover(u)
+    if mpc:
+        # Éléments rigides : Dirichlet sur K/F pleins (méthode pénalité non
+        # requise — apply_dirichlet renvoie K_bc/F_bc de taille n_dof), puis
+        # contraintes MPC par multiplicateurs de Lagrange.
+        K_bc, F_bc = apply_dirichlet(K, F, mesh, bc)
+        K_aug, F_aug = apply_mpc_lagrange(K_bc, F_bc, mesh, mpc)
+        sol = spsolve(K_aug.tocsc(), F_aug)
+        u_full = np.asarray(sol[: mesh.n_dof])
+    else:
+        ds = apply_dirichlet(K, F, mesh, bc)
+        u = StaticSolver().solve(ds.K_free, ds.F_free)
+        u_full = ds.recover(u)
+
     if verbose:
         u_max = float(np.abs(u_full).max())
         logger.info("  Statique : u_max = %.4e m", u_max)

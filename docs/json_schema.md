@@ -24,6 +24,7 @@ results = run_from_json("mon_modele.json")  # → dict
   "nodes": [ ... ],
   "elements": [ ... ],
   "boundary_conditions": { ... },
+  "rigid": [ ... ],
   "analysis": { ... }
 }
 ```
@@ -36,6 +37,7 @@ results = run_from_json("mon_modele.json")  # → dict
 | `nodes` | oui | tableau | Liste des coordonnées nodales |
 | `elements` | oui | tableau | Liste des éléments |
 | `boundary_conditions` | oui | objet | Conditions aux limites |
+| `rigid` | non | tableau | Éléments rigides RBE2/RBE3 (voir section dédiée) |
 | `analysis` | non | objet | Type d'analyse (défaut : `{"type": "static"}`) |
 
 ---
@@ -309,6 +311,57 @@ Vecteur d'accélération en m/s². `b = ρ × acceleration`.
 ```
 
 `qx` : charge axiale [N/m], `qy` : charge transverse [N/m], dans le repère local de l'élément.
+
+---
+
+## Éléments rigides (RBE2 / RBE3)
+
+Bloc optionnel de premier niveau `rigid` : une liste d'éléments rigides traduits
+en contraintes multi-points (MPC) et appliqués par multiplicateurs de Lagrange.
+Ils n'ont **pas** de matrice de rigidité. Supportés en **analyse statique**.
+
+```json
+"rigid": [
+    {"type": "RBE2", "master": 4, "slaves": [0, 1, 2, 3]},
+    {"type": "RBE2", "master": 4, "slaves": [0, 1], "dofs": [0, 1]},
+    {"type": "RBE3", "ref": 10, "nodes": [0, 1, 2]},
+    {"type": "RBE3", "ref": 10, "nodes": [0, 1, 2], "weights": [1, 2, 1]}
+]
+```
+
+### `RBE2` — liaison rigide
+
+Les nœuds esclaves suivent le mouvement de corps rigide du nœud maître
+(`u_S = u_M + ω_M × r`, `θ_S = θ_M`). Rigidifie la structure. Sert à distribuer
+une force, simuler un boulon, raccorder des maillages incompatibles.
+
+| Paramètre | Requis | Description |
+|-----------|--------|-------------|
+| `master` | oui | Indice du nœud maître (indépendant) |
+| `slaves` | oui | Liste des indices de nœuds esclaves (dépendants) |
+| `dofs` | non | DDL locaux esclaves à contraindre (défaut : tous, `0..dpn−1`) |
+
+Les rotations ne sont transmises que si le maillage possède des DDL de rotation
+(`dof_per_node` > `n_dim` : Beam2D dpn=3, Beam3D dpn=6). Pour un maillage continu
+(dpn = n_dim) le RBE2 se réduit à une égalité de translations.
+Exemple : `examples/rbe2_rigid_link.json`.
+
+### `RBE3` — distribution de forces
+
+Le déplacement du nœud de référence est la moyenne pondérée des nœuds
+indépendants : `u_ref[d] = Σ wᵢ·uᵢ[d] / Σ wᵢ`. N'ajoute **aucune rigidité** : une
+charge au nœud de référence est répartie sur les indépendants via les forces de
+contrainte. Sert à appliquer une charge répartie depuis un point ou à mesurer un
+déplacement moyen.
+
+| Paramètre | Requis | Description |
+|-----------|--------|-------------|
+| `ref` | oui | Indice du nœud de référence (dépendant) |
+| `nodes` | oui | Liste des indices de nœuds indépendants |
+| `weights` | non | Poids `wᵢ` (un par nœud indépendant ; défaut : poids égaux) |
+| `dofs` | non | DDL locaux de la référence à contraindre (défaut : tous) |
+
+Exemple : `examples/rbe3_load_distribution.json`.
 
 ---
 

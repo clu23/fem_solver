@@ -47,7 +47,7 @@ from femsolver.core.diagnostics import (
     _dof_labels,
     detect_mechanisms,
 )
-from femsolver.core.mesh import BoundaryConditions, Mesh
+from femsolver.core.mesh import BoundaryConditions, Mesh, MPCConstraint
 
 logger = logging.getLogger("femsolver.model_check")
 
@@ -190,13 +190,19 @@ _GAUSS = {
 # ---------------------------------------------------------------------------
 
 
-def _check_orphan_nodes(mesh: Mesh) -> list[CheckIssue]:
+def _check_orphan_nodes(
+    mesh: Mesh, mpc_nodes: frozenset[int] = frozenset()
+) -> list[CheckIssue]:
     """Détecte les nœuds non référencés par aucun élément.
 
     Un nœud orphelin n'a aucune raideur : ses DDL forment un mécanisme et
     rendent K singulière.  C'est une erreur bloquante.
+
+    Les nœuds participant à une contrainte rigide (RBE2/RBE3, ``mpc_nodes``)
+    sont exclus : leur cinématique est imposée par les MPC, ils ne sont donc
+    pas réellement orphelins.
     """
-    used: set[int] = set()
+    used: set[int] = set(mpc_nodes)
     for elem in mesh.elements:
         used.update(elem.node_ids)
     orphans = sorted(set(range(mesh.n_nodes)) - used)
@@ -626,6 +632,7 @@ def run_model_checks(
     bc: BoundaryConditions,
     *,
     analysis_type: str = "static",
+    mpc: tuple[MPCConstraint, ...] = (),
 ) -> ModelCheckReport:
     """Exécute toutes les vérifications de santé du modèle.
 
@@ -647,6 +654,12 @@ def run_model_checks(
         Type d'analyse.  ``"static"`` rend la singularité bloquante ; pour
         les autres analyses (modale, flambage…) un noyau peut être légitime
         et la singularité devient un simple avertissement.
+    mpc : tuple[MPCConstraint, ...]
+        Contraintes multi-points (RBE2/RBE3…).  Si non vide : les nœuds
+        impliqués sont exclus du test d'orphelins, et le test de singularité
+        de K est ignoré (les MPC modifient le système — la rigidité de la
+        structure nue n'est plus représentative ; un nœud de référence RBE3
+        sans raideur propre est légitimement tenu par les MPC).
 
     Returns
     -------
@@ -661,8 +674,14 @@ def run_model_checks(
     errors: list[CheckIssue] = []
     warnings: list[CheckIssue] = []
 
+    mpc_nodes = frozenset(
+        node_id for c in mpc for node_id, _, _ in c.terms
+    )
+
     # --- Géométrie (préalable à l'assemblage) ---
-    geometry_errors = _check_orphan_nodes(mesh) + _check_jacobians(mesh)
+    geometry_errors = (
+        _check_orphan_nodes(mesh, mpc_nodes) + _check_jacobians(mesh)
+    )
     errors.extend(geometry_errors)
 
     warnings.extend(_check_coincident_nodes(mesh))
@@ -670,7 +689,10 @@ def run_model_checks(
     warnings.extend(_check_element_quality(mesh))
 
     # --- Rigidité (seulement si la géométrie permet l'assemblage) ---
-    if not geometry_errors:
+    # Les contraintes rigides (RBE2/RBE3) modifient le système : un nœud de
+    # référence RBE3 n'a pas de raideur propre mais est tenu par les MPC. Le
+    # test de singularité sur la structure nue n'est donc pas représentatif.
+    if not geometry_errors and not mpc:
         try:
             stiffness_issues = _check_stiffness(
                 mesh, bc, static_like=(analysis_type == "static")

@@ -1,0 +1,36 @@
+{
+    "name": "RBE3 load distribution — weighted average",
+    "description": "Element de distribution RBE3. Le noeud de reference 6 (dependant) suit la moyenne ponderee des trois noeuds independants 0,1,2 (poids 1,2,3) : u_ref = (1*u0 + 2*u1 + 3*u2)/6. Chaque independant est retenu au sol par un ressort (k=1000 N/m) et charge en x (100, 200, 300 N) => deplacements 0.1, 0.2, 0.3 m. La reference vaut donc (0.1 + 0.4 + 0.9)/6 = 0.2333 m. Le RBE3 n'ajoute AUCUNE rigidite : la reponse des independants est inchangee. dpn=2.",
+    "materials": {
+        "dummy": {"E": 1.0, "nu": 0.0, "rho": 1.0}
+    },
+    "nodes": [
+        [0.0, 0.0], [0.0, 1.0], [0.0, 2.0],
+        [1.0, 0.0], [1.0, 1.0], [1.0, 2.0],
+        [5.0, 5.0]
+    ],
+    "elements": [
+        {"type": "Spring", "nodes": [0, 3], "stiffness": [1000.0, 1000.0]},
+        {"type": "Spring", "nodes": [1, 4], "stiffness": [1000.0, 1000.0]},
+        {"type": "Spring", "nodes": [2, 5], "stiffness": [1000.0, 1000.0]}
+    ],
+    "boundary_conditions": {
+        "dirichlet": [
+            {"node": 3, "dof": 0, "value": 0.0},
+            {"node": 3, "dof": 1, "value": 0.0},
+            {"node": 4, "dof": 0, "value": 0.0},
+            {"node": 4, "dof": 1, "value": 0.0},
+            {"node": 5, "dof": 0, "value": 0.0},
+            {"node": 5, "dof": 1, "value": 0.0}
+        ],
+        "neumann": [
+            {"node": 0, "dof": 0, "value": 100.0},
+            {"node": 1, "dof": 0, "value": 200.0},
+            {"node": 2, "dof": 0, "value": 300.0}
+        ]
+    },
+    "rigid": [
+        {"type": "RBE3", "ref": 6, "nodes": [0, 1, 2], "weights": [1.0, 2.0, 3.0]}
+    ],
+    "analysis": {"type": "static"}
+}
