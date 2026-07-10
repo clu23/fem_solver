@@ -104,7 +104,6 @@ from femsolver.core.element import Element
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.thermal import THERMAL_UNIT_3D, delta_T_at, normalize_delta_T
 
-
 # ---------------------------------------------------------------------------
 # Règle de Gauss-Legendre 3×3×3 (27 points)
 # ---------------------------------------------------------------------------
@@ -303,12 +302,12 @@ class Hexa20(Element):
             a = 1.0 + xi_i * xi
             b = 1.0 + eta_i * eta
             c = 1.0 + zeta_i * zeta
-            s = xi_i * xi + eta_i * eta + zeta_i * zeta - 2.0   # term (sum−2)
             # d(a·b·c·s)/da · da/dξ = ξᵢ · b·c·s + a·b·c·ξᵢ = ξᵢ·b·c·(s+a)
             # s + a = ξᵢξ+ηᵢη+ζᵢζ−2 + 1+ξᵢξ = 2ξᵢξ+ηᵢη+ζᵢζ−1
-            dN[0, i] = 0.125 * xi_i   * b * c * (2.0 * xi_i   * xi  + eta_i * eta + zeta_i * zeta - 1.0)
-            dN[1, i] = 0.125 * eta_i  * a * c * (xi_i * xi  + 2.0 * eta_i  * eta + zeta_i * zeta - 1.0)
-            dN[2, i] = 0.125 * zeta_i * a * b * (xi_i * xi  + eta_i * eta + 2.0 * zeta_i * zeta - 1.0)
+            q = 0.125
+            dN[0, i] = q * xi_i * b * c * (2.0 * xi_i * xi + eta_i * eta + zeta_i * zeta - 1.0)
+            dN[1, i] = q * eta_i * a * c * (xi_i * xi + 2.0 * eta_i * eta + zeta_i * zeta - 1.0)
+            dN[2, i] = q * zeta_i * a * b * (xi_i * xi + eta_i * eta + 2.0 * zeta_i * zeta - 1.0)
 
         # Nœuds milieux (8–19)
         for i in range(8, 20):

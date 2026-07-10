@@ -50,18 +50,14 @@ from __future__ import annotations
 import math
 
 import numpy as np
-import pytest
 from scipy.sparse import csr_matrix
 
-from femsolver.core.assembler import Assembler
-from femsolver.core.boundary import apply_dirichlet
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.dynamics.harmonic import HarmonicResult, run_harmonic, solve_harmonic
 from femsolver.dynamics.rayleigh import RayleighDamping, rayleigh_from_modes
 from femsolver.elements.bar2d import Bar2D
 from femsolver.elements.beam2d import Beam2D
-
 
 # ---------------------------------------------------------------------------
 # Données communes

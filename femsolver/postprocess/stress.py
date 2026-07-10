@@ -23,9 +23,8 @@ from __future__ import annotations
 import numpy as np
 
 from femsolver.core.mesh import Mesh
-from femsolver.elements.quad4 import Quad4, _GAUSS_POINTS_2X2
+from femsolver.elements.quad4 import _GAUSS_POINTS_2X2, Quad4
 from femsolver.elements.tri3 import Tri3
-
 
 # ---------------------------------------------------------------------------
 # Matrice d'extrapolation Gauss → nœuds pour Quad4 2×2

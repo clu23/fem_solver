@@ -47,7 +47,6 @@ from femsolver.core.element import Element
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.thermal import THERMAL_UNIT_2D, delta_T_at, normalize_delta_T
 
-
 # ---------------------------------------------------------------------------
 # Règle de quadrature de Gauss–Dunavant à 6 points, ordre 4
 # ---------------------------------------------------------------------------

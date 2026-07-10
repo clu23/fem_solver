@@ -47,7 +47,6 @@ from scipy.sparse import csr_matrix
 
 from femsolver.core.mesh import BoundaryConditions, Mesh
 
-
 # ---------------------------------------------------------------------------
 # DirichletSystem
 # ---------------------------------------------------------------------------

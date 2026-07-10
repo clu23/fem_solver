@@ -8,14 +8,11 @@ teste uniquement le comportement du CLI (argparse, dispatch, affichage).
 from __future__ import annotations
 
 import json
-import sys
-from io import StringIO
 from pathlib import Path
 
 import pytest
 
 from femsolver.__main__ import main
-
 
 # ---------------------------------------------------------------------------
 # Helpers

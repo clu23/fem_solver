@@ -21,8 +21,7 @@ from femsolver.core.boundary import apply_dirichlet
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.core.solver import StaticSolver
-from femsolver.elements.hexa20 import Hexa20, _NODE_COORDS, _GAUSS_POINTS_3X3X3
-
+from femsolver.elements.hexa20 import _GAUSS_POINTS_3X3X3, _NODE_COORDS, Hexa20
 
 # ---------------------------------------------------------------------------
 # Géométrie de référence : cube [-1,1]³

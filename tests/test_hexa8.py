@@ -39,7 +39,6 @@ from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.core.solver import StaticSolver
 from femsolver.elements.hexa8 import Hexa8
 
-
 # ---------------------------------------------------------------------------
 # Données communes
 # ---------------------------------------------------------------------------
@@ -497,7 +496,6 @@ class TestHexa8PatchTest:
         u = StaticSolver().solve(K_bc, F_bc)
 
         # Réactions = K · u - F_ext
-        from scipy.sparse import csr_matrix
         reactions = K @ u - F_ext
 
         # Réaction en z sur la base (nœuds 0..3, DDL z = 2, 5, 8, 11)

@@ -1,6 +1,7 @@
 """Noyau mathématique du solveur FEM."""
 
 from femsolver.core.assembler import Assembler
+from femsolver.core.boundary import DirichletSystem, apply_dirichlet
 from femsolver.core.diagnostics import (
     DiagnosticsResult,
     check_equilibrium,
@@ -8,7 +9,6 @@ from femsolver.core.diagnostics import (
     compute_reactions,
     run_diagnostics,
 )
-from femsolver.core.boundary import apply_dirichlet, DirichletSystem
 from femsolver.core.element import Element
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.mesh import (

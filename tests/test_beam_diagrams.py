@@ -35,11 +35,9 @@ from femsolver.core.solver import StaticSolver
 from femsolver.elements.beam2d import Beam2D
 from femsolver.elements.beam3d import Beam3D
 from femsolver.postprocess.beam_diagrams import (
-    BeamDiagram,
     extract_beam_diagrams,
     plot_beam_diagrams,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers

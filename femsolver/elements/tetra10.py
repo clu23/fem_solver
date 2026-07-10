@@ -56,7 +56,6 @@ from femsolver.core.element import Element
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.thermal import THERMAL_UNIT_3D, delta_T_at, normalize_delta_T
 
-
 # ---------------------------------------------------------------------------
 # Règle de quadrature de Gauss à 4 points pour tétraèdre, ordre 2
 # ---------------------------------------------------------------------------
@@ -192,7 +191,6 @@ class Tetra10(Element):
             ∂N9/∂ξ = 0,     ∂N9/∂η = 4ζ,    ∂N9/∂ζ = 4η
         """
         s = xi + eta + zeta
-        L1 = 1.0 - s
         dN_dxi = np.array([
             4.0*s - 3.0,                       # ∂N0/∂ξ = −4L1+1
             4.0*xi - 1.0,                       # ∂N1/∂ξ

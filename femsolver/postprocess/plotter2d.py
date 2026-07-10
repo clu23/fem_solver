@@ -133,7 +133,10 @@ def plot_truss(
                 nx, ny = 0.0, 1.0
 
             # Taille de l'offset = ~4% de la dimension caractéristique
-            span = max(nodes[:, 0].max() - nodes[:, 0].min(), nodes[:, 1].max() - nodes[:, 1].min())
+            span = max(
+                nodes[:, 0].max() - nodes[:, 0].min(),
+                nodes[:, 1].max() - nodes[:, 1].min(),
+            )
             offset = 0.04 * span
 
             sign = "+" if N >= 0 else ""

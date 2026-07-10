@@ -1,11 +1,5 @@
 """Module dynamique — analyse modale, harmonique, transitoire et aléatoire."""
 
-from femsolver.dynamics.modal import ModalResult, lumped_mass, run_modal
-from femsolver.dynamics.rayleigh import (
-    RayleighDamping,
-    build_damping_matrix,
-    rayleigh_from_modes,
-)
 from femsolver.dynamics.damping import HystereticDamping, ModalDampingModel
 from femsolver.dynamics.harmonic import (
     HarmonicResult,
@@ -14,6 +8,7 @@ from femsolver.dynamics.harmonic import (
     solve_harmonic_hysteretic,
     solve_harmonic_modal,
 )
+from femsolver.dynamics.modal import ModalResult, lumped_mass, run_modal
 from femsolver.dynamics.random_response import (
     RandomResult,
     compute_rms,
@@ -23,6 +18,11 @@ from femsolver.dynamics.random_response import (
     run_random_base,
     run_random_force,
     solve_random_force,
+)
+from femsolver.dynamics.rayleigh import (
+    RayleighDamping,
+    build_damping_matrix,
+    rayleigh_from_modes,
 )
 from femsolver.dynamics.transient import (
     NEWMARK_CENTRAL_DIFF,

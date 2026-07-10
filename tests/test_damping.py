@@ -74,7 +74,6 @@ from femsolver.core.assembler import Assembler
 from femsolver.core.boundary import apply_dirichlet
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
-from femsolver.core.solver import ModalSolver
 from femsolver.dynamics.damping import HystereticDamping, ModalDampingModel
 from femsolver.dynamics.harmonic import (
     run_harmonic,
@@ -82,11 +81,8 @@ from femsolver.dynamics.harmonic import (
     solve_harmonic_hysteretic,
     solve_harmonic_modal,
 )
-from femsolver.dynamics.modal import ModalResult, run_modal
-from femsolver.dynamics.rayleigh import RayleighDamping
-from femsolver.elements.bar2d import Bar2D
+from femsolver.dynamics.modal import run_modal
 from femsolver.elements.beam2d import Beam2D
-
 
 # ---------------------------------------------------------------------------
 # Paramètres communs

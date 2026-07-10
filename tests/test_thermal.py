@@ -32,7 +32,6 @@ from femsolver.elements.tetra4 import Tetra4
 from femsolver.elements.tri3 import Tri3
 from femsolver.io.json_model import load_model, run_from_json
 
-
 E = 210e9
 NU = 0.3
 RHO = 7850.0

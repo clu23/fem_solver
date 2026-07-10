@@ -224,7 +224,6 @@ def check_mass(
     Log ``WARNING`` si |m_fem − m_th| / m_th > tol.
     """
     n_dim = mesh.n_dim
-    dpn   = mesh.dpn
 
     # Masse FEM globale depuis M (DDL de translation uniquement)
     trans_dofs = _translational_dofs(mesh)
@@ -495,7 +494,6 @@ def run_diagnostics(
         "  " + "-" * 40,
     ]
 
-    constrained = _constrained_dofs(mesh, bc)
     # Regrouper les DDL par nœud pour un affichage compact
     node_rxn: dict[int, dict[int, float]] = {}
     for dof, r_val in sorted(reactions.items()):

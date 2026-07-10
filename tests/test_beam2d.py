@@ -28,7 +28,6 @@ aussi proches que possible de l'interface réelle.
 from __future__ import annotations
 
 import numpy as np
-import pytest
 from scipy.sparse.linalg import spsolve
 
 from femsolver.core.assembler import Assembler
@@ -36,7 +35,6 @@ from femsolver.core.boundary import apply_dirichlet
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.elements.beam2d import Beam2D
-
 
 # ---------------------------------------------------------------------------
 # Données communes

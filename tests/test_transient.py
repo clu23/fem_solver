@@ -48,7 +48,6 @@ from femsolver.dynamics.transient import (
     solve_newmark,
 )
 
-
 # ---------------------------------------------------------------------------
 # Helpers : construction d'un oscillateur 1-DDL
 # ---------------------------------------------------------------------------

@@ -16,14 +16,13 @@ from femsolver.core.assembler import Assembler
 from femsolver.core.boundary import apply_dirichlet
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
+from femsolver.core.sections import RectangularSection
 from femsolver.core.solver import BucklingSolver, StaticSolver
 from femsolver.elements.bar2d import Bar2D
 from femsolver.elements.beam2d import Beam2D
 from femsolver.elements.beam3d import Beam3D
 from femsolver.elements.hexa8 import Hexa8
 from femsolver.elements.quad4 import Quad4
-from femsolver.core.sections import RectangularSection
-
 
 # ---------------------------------------------------------------------------
 # Matériaux et géométries standards

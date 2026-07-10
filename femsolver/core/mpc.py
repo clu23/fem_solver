@@ -35,10 +35,9 @@ solveur direct requis (spsolve).
 from __future__ import annotations
 
 import numpy as np
-from scipy.sparse import coo_matrix, csr_matrix, bmat
+from scipy.sparse import bmat, coo_matrix, csr_matrix
 
-from femsolver.core.mesh import MPCConstraint, Mesh
-
+from femsolver.core.mesh import Mesh, MPCConstraint
 
 # ---------------------------------------------------------------------------
 # Méthode d'élimination

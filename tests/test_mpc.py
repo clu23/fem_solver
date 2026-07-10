@@ -37,7 +37,6 @@ from femsolver.core.solver import StaticSolver
 from femsolver.elements.bar2d import Bar2D
 from femsolver.elements.beam2d import Beam2D
 
-
 # ---------------------------------------------------------------------------
 # Fixtures matériaux
 # ---------------------------------------------------------------------------

@@ -52,7 +52,6 @@ from femsolver.core.solver import StaticSolver
 from femsolver.elements.bar2d import Bar2D
 from femsolver.elements.beam2d import Beam2D
 
-
 # ---------------------------------------------------------------------------
 # Fixtures : Treillis Warren 2D
 # ---------------------------------------------------------------------------
@@ -544,9 +543,11 @@ class TestDetectMechanisms:
     def test_rotation_label_from_synthetic_K(self):
         """Identification d'une rotation θz sur une K synthétique (3D θx aussi)."""
         import scipy.sparse as sp
+
+        from femsolver.core.sections import RectangularSection
+
         # Maillage Beam3D factice (6 DDL/nœud) pour les étiquettes.
         from femsolver.elements.beam3d import Beam3D
-        from femsolver.core.sections import RectangularSection
         sec = RectangularSection(width=0.05, height=0.05)
         nodes = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
         elems = [ElementData(Beam3D, (0, 1), _STEEL, {"section": sec})]

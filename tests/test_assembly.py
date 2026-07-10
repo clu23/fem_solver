@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from femsolver.core.assembler import Assembler
 from femsolver.core.boundary import apply_dirichlet
@@ -11,7 +10,6 @@ from femsolver.core.material import ElasticMaterial
 from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.core.solver import StaticSolver
 from femsolver.elements.bar2d import Bar2D
-
 
 STEEL = ElasticMaterial(E=210e9, nu=0.3, rho=7800)
 AREA = 1e-4  # m²

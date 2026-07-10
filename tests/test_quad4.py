@@ -12,7 +12,6 @@ from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.core.solver import StaticSolver
 from femsolver.elements.quad4 import Quad4
 
-
 # ---------------------------------------------------------------------------
 # Données communes
 # ---------------------------------------------------------------------------

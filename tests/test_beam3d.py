@@ -46,7 +46,6 @@ from femsolver.core.material import ElasticMaterial
 from femsolver.core.sections import CircularSection, RectangularSection
 from femsolver.elements.beam3d import Beam3D
 
-
 # ---------------------------------------------------------------------------
 # Fixtures communes
 # ---------------------------------------------------------------------------

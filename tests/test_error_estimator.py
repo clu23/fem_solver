@@ -33,7 +33,6 @@ from femsolver.elements.quad4 import Quad4
 from femsolver.elements.tri3 import Tri3
 from femsolver.postprocess.error_estimator import ZZErrorResult, zz_error_estimate
 
-
 # ---------------------------------------------------------------------------
 # Fixtures : maillages simples
 # ---------------------------------------------------------------------------
@@ -327,8 +326,8 @@ class TestZZMixedMesh:
 
     def test_unsupported_element_raises(self) -> None:
         """Un type d'élément non supporté lève NotImplementedError."""
-        from femsolver.elements.bar2d import Bar2D
         from femsolver.core.mesh import ElementData
+        from femsolver.elements.bar2d import Bar2D
 
         nodes = np.array([[0.0, 0.0], [1.0, 0.0]])
         props = {"area": 1e-4}

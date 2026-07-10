@@ -12,7 +12,6 @@ from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.core.solver import StaticSolver
 from femsolver.elements.tri3 import Tri3
 
-
 # ---------------------------------------------------------------------------
 # Matériau de référence
 # ---------------------------------------------------------------------------

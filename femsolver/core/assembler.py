@@ -9,13 +9,10 @@ from scipy.sparse import coo_matrix, csr_matrix
 
 from femsolver.core.mesh import (
     BoundaryConditions,
-    BodyForce,
-    DistributedLineLoad,
     ElementData,
     Mesh,
     PressureLoad,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers pour les charges distribuées et surfaciques

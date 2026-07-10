@@ -27,7 +27,6 @@ from femsolver.elements.quad4 import Quad4
 from femsolver.elements.tetra4 import Tetra4
 from femsolver.elements.tri3 import Tri3
 
-
 # ---------------------------------------------------------------------------
 # Fixtures matériaux
 # ---------------------------------------------------------------------------

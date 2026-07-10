@@ -16,8 +16,6 @@ Références analytiques
 from __future__ import annotations
 
 import json
-import textwrap
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -25,7 +23,6 @@ import pytest
 from femsolver.dynamics.damping import HystereticDamping
 from femsolver.dynamics.rayleigh import RayleighDamping
 from femsolver.io.json_model import FEModel, load_model, run_from_json
-
 
 # ---------------------------------------------------------------------------
 # Helpers — modèles JSON inline (pas de fichiers sur disque)
@@ -531,8 +528,9 @@ class TestSectionParsing:
         assert sec.area == pytest.approx(0.05 * 0.10)
 
     def test_circular_section(self):
-        from femsolver.core.sections import CircularSection
         import math
+
+        from femsolver.core.sections import CircularSection
         model = _load_inline(self._make_beam_json(
             {"type": "circular", "radius": 0.05}
         ))

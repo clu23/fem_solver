@@ -40,9 +40,8 @@ from __future__ import annotations
 import numpy as np
 
 from femsolver.core.mesh import Mesh
-from femsolver.elements.hexa8 import Hexa8, _GAUSS_POINTS_2X2X2
+from femsolver.elements.hexa8 import _GAUSS_POINTS_2X2X2, Hexa8
 from femsolver.elements.tetra4 import Tetra4
-
 
 # ---------------------------------------------------------------------------
 # Matrice d'extrapolation Gauss → nœuds pour Hexa8 2×2×2 (précalculée)

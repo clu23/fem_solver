@@ -93,7 +93,9 @@ def _vtk_cell_type(etype: type) -> int:
 # Construction de la grille PyVista
 # ---------------------------------------------------------------------------
 
-def _build_pyvista_grid(mesh: Mesh, u_displaced: np.ndarray | None = None) -> "pv.UnstructuredGrid":
+def _build_pyvista_grid(
+    mesh: Mesh, u_displaced: np.ndarray | None = None
+) -> "pv.UnstructuredGrid":
     """Construire un `pv.UnstructuredGrid` depuis un objet `Mesh` femsolver.
 
     Parameters

@@ -33,9 +33,7 @@ from femsolver.core.boundary import apply_dirichlet
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.dynamics.damping import HystereticDamping, ModalDampingModel
-from femsolver.dynamics.rayleigh import RayleighDamping, build_damping_matrix
 from femsolver.dynamics.random_response import (
-    RandomResult,
     compute_rms,
     influence_vector,
     miles_equation,
@@ -44,8 +42,8 @@ from femsolver.dynamics.random_response import (
     run_random_force,
     solve_random_force,
 )
+from femsolver.dynamics.rayleigh import RayleighDamping, build_damping_matrix
 from femsolver.elements.bar2d import Bar2D
-
 
 # ---------------------------------------------------------------------------
 # Helpers — SDOF Bar2D

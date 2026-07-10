@@ -72,7 +72,7 @@ Bathe K.J., «Finite Element Procedures», §9.4, 2nd ed., 2014.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Callable
 
 import numpy as np
@@ -89,7 +89,6 @@ from femsolver.dynamics.rayleigh import (
     RayleighDamping,
     build_damping_matrix,
 )
-
 
 # ---------------------------------------------------------------------------
 # Paramètres du schéma

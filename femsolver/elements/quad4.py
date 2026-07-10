@@ -8,7 +8,6 @@ from femsolver.core.element import Element
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.thermal import THERMAL_UNIT_2D, delta_T_at, normalize_delta_T
 
-
 # ---------------------------------------------------------------------------
 # Points et poids de Gauss 2×2 (intégration exacte jusqu'au degré 3)
 # ---------------------------------------------------------------------------

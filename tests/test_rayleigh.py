@@ -51,7 +51,6 @@ from femsolver.dynamics.rayleigh import (
 from femsolver.elements.bar2d import Bar2D
 from femsolver.elements.beam2d import Beam2D
 
-
 # ---------------------------------------------------------------------------
 # Matériau et données communes
 # ---------------------------------------------------------------------------

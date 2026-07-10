@@ -51,7 +51,6 @@ from femsolver.core.sections import (
 )
 from femsolver.elements.beam2d import Beam2D
 
-
 # ──────────────────────────────────────────────────────────────────────────────
 # Données communes
 # ──────────────────────────────────────────────────────────────────────────────

@@ -35,7 +35,6 @@ from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.core.solver import StaticSolver
 from femsolver.elements.tetra4 import Tetra4
 
-
 # ---------------------------------------------------------------------------
 # Données communes
 # ---------------------------------------------------------------------------

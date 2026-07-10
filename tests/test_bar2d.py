@@ -12,7 +12,6 @@ from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.core.solver import StaticSolver
 from femsolver.elements.bar2d import Bar2D
 
-
 # ---------------------------------------------------------------------------
 # Données communes
 # ---------------------------------------------------------------------------

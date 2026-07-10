@@ -476,7 +476,8 @@ class HollowCircularSection(Section):
             raise ValueError(f"inner_radius doit être > 0, reçu {self.inner_radius}")
         if self.inner_radius >= self.outer_radius:
             raise ValueError(
-                f"inner_radius ({self.inner_radius}) doit être < outer_radius ({self.outer_radius})"
+                f"inner_radius ({self.inner_radius}) doit être < "
+                f"outer_radius ({self.outer_radius})"
             )
 
     @property
@@ -795,7 +796,7 @@ class HollowRectangularSection(Section):
 
     @property
     def area(self) -> float:
-        B, H, t = self.outer_width, self.outer_height, self.thickness
+        B, H = self.outer_width, self.outer_height
         return B * H - self._inner_w * self._inner_h
 
     @property

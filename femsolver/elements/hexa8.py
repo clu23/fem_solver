@@ -119,7 +119,6 @@ from femsolver.core.element import Element
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.thermal import THERMAL_UNIT_3D, delta_T_at, normalize_delta_T
 
-
 # ---------------------------------------------------------------------------
 # Points et poids de Gauss 2×2×2
 # ---------------------------------------------------------------------------
@@ -951,7 +950,6 @@ class Hexa8(Element):
 
             M_e = ρ · einsum('g,ge,gij->eij', w, det_J, NtN)
         """
-        n_e = nodes_batch.shape[0]
         gp = _GP
         xi_eta_zeta_w = [
             (-gp, -gp, -gp, 1.0), ( gp, -gp, -gp, 1.0),

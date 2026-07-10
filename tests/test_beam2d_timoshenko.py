@@ -61,7 +61,6 @@ from femsolver.core.sections import (
 from femsolver.elements.beam2d import Beam2D
 from femsolver.elements.beam2d_timoshenko import Beam2DTimoshenko
 
-
 # ---------------------------------------------------------------------------
 # Constantes communes
 # ---------------------------------------------------------------------------

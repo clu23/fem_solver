@@ -45,9 +45,8 @@ import pytest
 
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
-from femsolver.dynamics.modal import ModalResult, run_modal
+from femsolver.dynamics.modal import run_modal
 from femsolver.elements.hexa8 import Hexa8
-
 
 # ---------------------------------------------------------------------------
 # Paramètres du problème
@@ -249,7 +248,6 @@ class TestMOrthogonality:
         et constitue un contrôle de cohérence de l'assemblage et du solveur.
         """
         from femsolver.core.assembler import Assembler
-        from femsolver.core.boundary import apply_dirichlet
 
         n_modes = 4
         mesh, bc = _build_cantilever(nx=8)

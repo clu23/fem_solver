@@ -23,7 +23,6 @@ from femsolver.core.solver import StaticSolver
 from femsolver.elements.hexa8 import Hexa8
 from femsolver.elements.quad4 import Quad4
 
-
 # ---------------------------------------------------------------------------
 # Données communes
 # ---------------------------------------------------------------------------

@@ -18,7 +18,6 @@ from femsolver.core.solver import StaticSolver
 from femsolver.elements.spring import SpringElement
 from femsolver.io.json_model import FEModel, solve_model
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------

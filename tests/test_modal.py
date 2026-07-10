@@ -30,9 +30,8 @@ from femsolver.core.assembler import Assembler
 from femsolver.core.boundary import DirichletSystem, apply_dirichlet
 from femsolver.core.material import ElasticMaterial
 from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
-from femsolver.dynamics.modal import ModalResult, lumped_mass, run_modal
+from femsolver.dynamics.modal import lumped_mass, run_modal
 from femsolver.elements.bar2d import Bar2D
-
 
 # ---------------------------------------------------------------------------
 # Données communes

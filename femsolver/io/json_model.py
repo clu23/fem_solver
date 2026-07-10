@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -35,7 +35,6 @@ from scipy.sparse.linalg import spsolve
 from femsolver.core.assembler import Assembler
 from femsolver.core.boundary import apply_dirichlet
 from femsolver.core.material import ElasticMaterial
-from femsolver.core.model_check import run_model_checks
 from femsolver.core.mesh import (
     BodyForce,
     BoundaryConditions,
@@ -45,6 +44,7 @@ from femsolver.core.mesh import (
     MPCConstraint,
     PressureLoad,
 )
+from femsolver.core.model_check import run_model_checks
 from femsolver.core.mpc import apply_mpc_lagrange
 from femsolver.core.rigid import make_rbe2_constraints, make_rbe3_constraints
 from femsolver.core.sections import (
@@ -58,7 +58,7 @@ from femsolver.core.sections import (
     Section,
 )
 from femsolver.core.solver import BucklingSolver, StaticSolver
-from femsolver.dynamics.damping import HystereticDamping, ModalDampingModel
+from femsolver.dynamics.damping import HystereticDamping
 from femsolver.dynamics.harmonic import run_harmonic
 from femsolver.dynamics.modal import run_modal
 from femsolver.dynamics.random_response import (
@@ -73,13 +73,13 @@ from femsolver.elements.beam2d import Beam2D
 from femsolver.elements.beam2d_timoshenko import Beam2DTimoshenko
 from femsolver.elements.beam3d import Beam3D
 from femsolver.elements.damper import DamperElement
-from femsolver.elements.hexa20 import Hexa20
 from femsolver.elements.hexa8 import Hexa8
+from femsolver.elements.hexa20 import Hexa20
 from femsolver.elements.quad4 import Quad4
 from femsolver.elements.quad8 import Quad8
 from femsolver.elements.spring import SpringElement
-from femsolver.elements.tetra10 import Tetra10
 from femsolver.elements.tetra4 import Tetra4
+from femsolver.elements.tetra10 import Tetra10
 from femsolver.elements.tri3 import Tri3
 from femsolver.elements.tri6 import Tri6
 
@@ -520,7 +520,6 @@ def _build_F_hat(
         return F
     for entry in f_hat_spec:
         node = int(entry["node"])
-        dof = int(entry["dof"])
         val = float(entry["value"])
         F[node] = val  # will be overwritten if dpn != 1; use global_idx
     return F
@@ -657,7 +656,6 @@ def _build_mesh_and_bc(data: dict[str, Any]) -> tuple[Mesh, BoundaryConditions]:
 
     # --- Conditions aux limites ---
     bc_dict = data.get("boundary_conditions", {})
-    dpn = mesh.dpn
 
     # Dirichlet
     dirichlet: dict[int, dict[int, float]] = {}

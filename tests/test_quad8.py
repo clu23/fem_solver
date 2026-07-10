@@ -40,9 +40,8 @@ from femsolver.core.material import ElasticMaterial
 from femsolver.core.mesh import BoundaryConditions, ElementData, Mesh
 from femsolver.core.solver import StaticSolver
 from femsolver.elements.quad4 import Quad4
-from femsolver.elements.quad8 import Quad8, _GAUSS_POINTS_3X3
+from femsolver.elements.quad8 import _GAUSS_POINTS_3X3, Quad8
 from femsolver.elements.tri6 import Tri6
-
 
 # ---------------------------------------------------------------------------
 # Données communes
@@ -98,7 +97,7 @@ class TestQuad8ShapeFunctions:
 
     def test_nodal_interpolation(self) -> None:
         """Ni vaut 1 au nœud i et 0 aux 7 autres nœuds."""
-        from femsolver.elements.quad8 import _NODE_XI, _NODE_ETA
+        from femsolver.elements.quad8 import _NODE_ETA, _NODE_XI
         elem = Quad8()
         for i in range(8):
             xi_i, eta_i = _NODE_XI[i], _NODE_ETA[i]
