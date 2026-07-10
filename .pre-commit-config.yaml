@@ -1,0 +1,21 @@
+# Hooks locaux — voir README / plan CI.
+#   commit : ruff (lint + auto-fix) sur les fichiers modifiés → retour instantané
+#   push   : suite pytest complète → filet avant d'envoyer sur le remote
+# Installation :
+#   .venv/bin/pre-commit install
+#   .venv/bin/pre-commit install --hook-type pre-push
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.21
+    hooks:
+      - id: ruff
+        args: [--fix]
+
+  - repo: local
+    hooks:
+      - id: pytest
+        name: pytest (pre-push)
+        entry: .venv/bin/python3 -m pytest tests/ -q
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

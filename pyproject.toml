@@ -27,6 +27,8 @@ dev = [
     "pytest>=7.0",
     "pytest-cov",
     "mypy",
+    "ruff",
+    "pre-commit",
 ]
 all = ["fem-solver[viz3d,perf,dev]"]
 
@@ -36,6 +38,27 @@ include = ["femsolver*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v --tb=short"
+
+[tool.ruff]
+line-length = 99
+target-version = "py311"
+# Périmètre du lint = bibliothèque + tests. Les scripts de démonstration
+# (examples/, benchmarks/) sont volontairement hors périmètre.
+extend-exclude = ["examples", "benchmarks"]
+
+[tool.ruff.lint]
+# Baseline sûre : pyflakes (F) + pycodestyle (E/W) + isort (I).
+# Étendre plus tard vers UP, B, SIM une fois le vert stable.
+select = ["E", "F", "W", "I"]
+# Règles stylistiques/domaine volontairement tolérées :
+#   E702 : point-virgule d'alignement des entrées de matrices (K_e, M_e)
+#   E741 : noms mono-lettre standards en mécanique (I = inertie, l = longueur)
+#   E731 : affectation de lambda (usage local assumé, ex. intégrateurs)
+ignore = ["E702", "E741", "E731"]
+
+[tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]    # ré-exports volontaires
+"tests/*" = ["E501", "F841"]  # lignes longues + variables intermédiaires dans les tests
 
 [tool.mypy]
 python_version = "3.11"
